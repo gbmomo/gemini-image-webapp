@@ -1,0 +1,598 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>码言旗下Nano Banana Pro AI图片生成器</title>
+    <link rel="icon" href="/static/logo.ico" type="image/x-icon">
+    <link rel="stylesheet" href="/static/css/style.css">
+    <link href="/static/fonts/inter.css" rel="stylesheet">
+</head>
+
+<body>
+    <!-- 顶部横幅 -->
+    <header class="top-banner">
+        <!-- 汉堡菜单按钮（移动端） -->
+        <button class="hamburger-btn" id="hamburgerBtn" aria-label="打开菜单">
+            <span class="hamburger-line"></span>
+            <span class="hamburger-line"></span>
+            <span class="hamburger-line"></span>
+        </button>
+        <!-- 左侧logo和标题 -->
+        <div class="site-header">
+            <img src="/static/logo.ico" alt="Logo" class="site-logo">
+            <div class="site-title-group">
+                <span class="site-title">码言nano</span>
+                <span class="site-subtitle">在线使用Nano Banana Pro</span>
+            </div>
+        </div>
+        <!-- 中间内容 -->
+        <div class="banner-content">
+            <span class="banner-text">码言旗下</span>
+            <span class="banner-highlight">🍌 Nano Banana Pro</span>
+            <span class="banner-text">4K AI图片生成器</span>
+            <span class="banner-divider">|</span>
+            <span class="banner-price">$0.04起/张</span>
+            <span class="banner-divider">|</span>
+            <span class="banner-tag trial">免费试用</span>
+        </div>
+        <!-- 右侧用户信息 -->
+        <div class="user-menu">
+            {% if user %}
+            <span class="user-credits" id="userCredits" title="剩余点数">🪙 {{ user.credits }} 点</span>
+            <button class="btn-recharge" id="btnRecharge" title="充值点数">💳 充值</button>
+            {% endif %}
+            <span class="user-name">👤 {{ session.username }}</span>
+            {% if session.is_admin %}
+            <a href="/admin" class="btn-admin">管理后台</a>
+            {% endif %}
+            <a href="/api/logout" class="btn-user-logout">退出</a>
+        </div>
+    </header>
+
+    <!-- 侧边栏遮罩层（移动端） -->
+    <div class="sidebar-overlay" id="sidebarOverlay"></div>
+
+    <div class="app-container">
+        <!-- 左侧边栏 - 会话列表 -->
+        <aside class="sidebar" id="sidebar">
+            <div class="sidebar-header">
+                <div class="sidebar-header-top">
+                    <h1 class="logo">
+                        <span class="logo-icon">🍌</span>
+                        <span class="logo-text">
+                            <span class="logo-brand">码言旗下</span>
+                            <span class="logo-name">Nano Banana Pro</span>
+                        </span>
+                    </h1>
+                    <button class="sidebar-close-btn" id="sidebarCloseBtn" aria-label="关闭菜单">✕</button>
+                </div>
+                <button class="btn-new-chat" id="btnNewChat">
+                    <span class="icon">+</span>
+                    新对话
+                </button>
+            </div>
+            <div class="session-list" id="sessionList">
+                <!-- 会话列表项会动态生成 -->
+            </div>
+        </aside>
+
+        <!-- 主内容区 -->
+        <main class="main-content">
+            <!-- 控制面板 -->
+            <div class="control-panel">
+                <!-- 参考图上传 -->
+                <div class="control-section">
+                    <div class="section-header">
+                        <span class="section-icon">🖼️</span>
+                        <span>参考图（可选）</span>
+                        <span class="section-hint">最多14张</span>
+                    </div>
+                    <div class="upload-container">
+                        <div class="upload-area" id="uploadArea">
+                            <input type="file" id="referenceImage" accept="image/*" multiple hidden>
+                            <div class="upload-placeholder" id="uploadPlaceholder">
+                                <div class="upload-icon">📤</div>
+                                <div class="upload-text">上传</div>
+                                <div class="upload-hint">点击或拖拽</div>
+                            </div>
+                        </div>
+                        <div class="preview-list" id="previewList">
+                            <!-- 预览图片会动态添加 -->
+                        </div>
+                    </div>
+                    <p class="hint-text">可选：上传参考图进行图生图。支持拖拽或粘贴截图，最多14张</p>
+                </div>
+
+                <!-- 提示词输入 -->
+                <div class="control-section">
+                    <div class="section-header">
+                        <span class="section-icon">✏️</span>
+                        <span>提示词</span>
+                    </div>
+                    <textarea id="promptInput" class="prompt-input" placeholder="例如：一只可爱的小猫咪坐在花园里，油画风格，高清，细节丰富"
+                        rows="4"></textarea>
+                </div>
+
+
+
+                <!-- 分辨率和宽高比 -->
+                <div class="control-section">
+                    <div class="section-header">
+                        <span class="section-icon">⚙️</span>
+                        <span>纵横比 & 分辨率</span>
+                    </div>
+
+                    <!-- 分辨率 -->
+                    <div class="option-group" id="resolutionGroup">
+                        <label class="option-label">分辨率(不同分辨率消耗金币数目不同)</label>
+                        <div class="option-buttons" id="resolutionButtons">
+                            <button class="option-btn resolution-btn active" data-value="1K">
+                                <span class="res-label">1K</span>
+                                <span class="res-cost-tag">🪙 1</span>
+                            </button>
+                            <button class="option-btn resolution-btn" data-value="2K">
+                                <span class="res-label">2K</span>
+                                <span class="res-cost-tag">🪙 2</span>
+                            </button>
+                            <button class="option-btn resolution-btn" data-value="4K">
+                                <span class="res-label">4K</span>
+                                <span class="res-cost-tag">🪙 4</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- 宽高比 -->
+                    <div class="option-group">
+                        <label class="option-label">纵横比</label>
+                        <div class="option-buttons aspect-ratio-buttons" id="aspectRatioButtons">
+                            <button class="option-btn active" data-value="auto">auto 自适应</button>
+                            <button class="option-btn" data-value="1:1">1:1 方形</button>
+                            <button class="option-btn" data-value="16:9">16:9 横版</button>
+                            <button class="option-btn" data-value="9:16">9:16 竖版</button>
+                            <button class="option-btn" data-value="4:3">4:3 横版</button>
+                            <button class="option-btn" data-value="3:4">3:4 竖版</button>
+                            <button class="option-btn" data-value="21:9">21:9 超宽</button>
+                            <button class="option-btn" data-value="3:2">3:2 横版</button>
+                            <button class="option-btn" data-value="2:3">2:3 竖版</button>
+                        </div>
+                    </div>
+                    <p class="hint-text warning-hint">⚠️ 更改分辨率或纵横比会重置对话记忆，AI 将无法记住之前生成的图片</p>
+                </div>
+
+                <!-- 生成按钮 -->
+                <div class="generate-section">
+                    <button class="btn-generate" id="btnGenerate">
+                        <span class="generate-icon">✨</span>
+                        <span>生成图片</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- 预览区域 -->
+            <div class="preview-panel">
+                <div class="preview-header">
+                    <div class="preview-tabs">
+                        <button class="preview-tab active">
+                            <span class="tab-icon">🖼️</span>
+                            聊天区
+                        </button>
+                    </div>
+                </div>
+                <div class="preview-content" id="previewContent">
+                    <div class="empty-state" id="emptyState">
+                        <div class="empty-icon">🖼️</div>
+                        <p class="empty-text">对话内容与生成的图片将在这里显示</p>
+                        <p class="empty-hint">在左侧输入提示词，点击生成按钮开始创作</p>
+                    </div>
+                    <div class="message-list" id="messageList" hidden>
+                        <!-- 消息会动态添加 -->
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- 加载遮罩 -->
+    <div class="loading-overlay" id="loadingOverlay" hidden>
+        <div class="loading-spinner"></div>
+        <p class="loading-text">正在生成图片...</p>
+        <p class="loading-hint">预计耗时 1 min</p>
+    </div>
+
+    <!-- 图片预览模态框 -->
+    <div class="image-modal" id="imageModal" hidden>
+        <div class="modal-backdrop" id="modalBackdrop"></div>
+        <div class="modal-content">
+            <img id="modalImage" src="" alt="大图预览">
+            <div class="modal-actions">
+                <a class="btn-download" id="btnDownload" download>
+                    <span>📥</span> 下载图片
+                </a>
+                <button class="btn-close-modal" id="btnCloseModal">✕</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 充值模态框 -->
+    <div class="custom-modal-overlay" id="rechargeModalOverlay" style="display: none;">
+        <div class="custom-modal recharge-modal">
+            <div class="custom-modal-header">
+                <h3 class="custom-modal-title">
+                    <span class="custom-modal-icon">💳</span>
+                    点数充值
+                </h3>
+                <button class="custom-modal-close-btn" id="closeRechargeModal">&times;</button>
+            </div>
+            <div class="custom-modal-body">
+                <div class="recharge-section">
+                    <div class="recharge-option">
+                        <div class="recharge-option-icon">🛒</div>
+                        <div class="recharge-option-info">
+                            <h4>购买卡密</h4>
+                            <p>在商城购买点数卡密，获取充值码</p>
+                        </div>
+                        <button class="btn-buy-card"
+                            onclick="window.open('https://pay.ldxp.cn/shop/momo/fhrvq4', '_blank')">
+                            去购买 →
+                        </button>
+                    </div>
+                </div>
+                <div class="recharge-divider">
+                    <span>或</span>
+                </div>
+                <div class="recharge-section">
+                    <div class="recharge-input-group">
+                        <label>输入卡密充值</label>
+                        <div class="recharge-input-row">
+                            <input type="text" id="cardKeyInput" class="recharge-input" placeholder="请输入16位卡密码"
+                                maxlength="20">
+                            <button class="btn-redeem" id="btnRedeem">确认充值</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 登录/注册模态框 -->
+    <div class="auth-modal-overlay {% if not session.user_id %}auth-modal-show{% endif %}" id="authModalOverlay">
+        <div class="auth-modal-content">
+            <!-- 登录表单 -->
+            <div id="loginSection">
+                <div class="auth-header">
+                    <img src="/static/logo.ico" alt="Logo" class="auth-logo">
+                    <h2 class="auth-title">欢迎回来</h2>
+                    <p class="auth-subtitle">登录码言 Nano Banana Pro 创作</p>
+                </div>
+                <form class="auth-form" id="loginForm">
+                    <div class="form-group">
+                        <label>用户名</label>
+                        <input type="text" id="loginUsername" required placeholder="请输入用户名">
+                    </div>
+                    <div class="form-group">
+                        <label>密码</label>
+                        <input type="password" id="loginPassword" required placeholder="请输入密码">
+                    </div>
+                    <div class="form-error" id="loginError"></div>
+                    <button type="submit" class="btn-auth btn-full">登 录</button>
+                </form>
+                <div class="auth-footer">
+                    <p>还没有账号？<a href="#" onclick="switchAuthMode('register')">立即注册</a></p>
+                </div>
+            </div>
+
+            <!-- 注册表单 -->
+            <div id="registerSection" style="display: none;">
+                <div class="auth-header">
+                    <img src="/static/logo.ico" alt="Logo" class="auth-logo">
+                    <h2 class="auth-title">创建账号</h2>
+                    <p class="auth-subtitle">加入码言 Nano Banana Pro 开启 AI 之旅</p>
+                </div>
+                <form class="auth-form" id="registerForm">
+                    <div class="form-group">
+                        <label>用户名</label>
+                        <input type="text" id="regUsername" required placeholder="至少3个字符" minlength="3">
+                    </div>
+                    <div class="form-group">
+                        <label>邮箱</label>
+                        <input type="email" id="regEmail" required placeholder="请输入邮箱地址">
+                    </div>
+                    <div class="form-group">
+                        <label>验证码</label>
+                        <div style="display: flex; gap: 10px;">
+                            <input type="text" id="regVerificationCode" required placeholder="请输入邮箱验证码" maxlength="6"
+                                style="flex: 1;">
+                            <button type="button" class="btn-send-code" id="btnSendCode">发送验证码</button>
+                        </div>
+                        <small id="codeHint"
+                            style="color: #666; font-size: 12px; display: none; margin-top: 5px;"></small>
+                    </div>
+                    <div class="form-group">
+                        <label>密码</label>
+                        <input type="password" id="regPassword" required placeholder="至少6个字符" minlength="6">
+                    </div>
+                    <div class="form-group">
+                        <label>确认密码</label>
+                        <input type="password" id="regConfirmPassword" required placeholder="请再次输入密码">
+                    </div>
+                    <div class="form-error" id="registerError"></div>
+                    <button type="submit" class="btn-auth btn-full">注 册</button>
+                </form>
+                <div class="auth-footer">
+                    <p>已有账号？<a href="#" onclick="switchAuthMode('login')">返回登录</a></p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 引入自定义 Modal 样式 -->
+    <link rel="stylesheet" href="/static/css/modal.css">
+
+    <script src="/static/js/main.js"></script>
+    <!-- 引入自定义 Modal 脚本 -->
+    <script src="/static/js/modal.js"></script>
+    <script>
+        // 认证相关逻辑
+        function switchAuthMode(mode) {
+            const loginSection = document.getElementById('loginSection');
+            const registerSection = document.getElementById('registerSection');
+            const errorDivs = document.querySelectorAll('.form-error');
+
+            errorDivs.forEach(div => div.textContent = '');
+
+            if (mode === 'register') {
+                loginSection.style.display = 'none';
+                registerSection.style.display = 'block';
+            } else {
+                loginSection.style.display = 'block';
+                registerSection.style.display = 'none';
+            }
+        }
+
+        document.getElementById('loginForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const username = document.getElementById('loginUsername').value;
+            const password = document.getElementById('loginPassword').value;
+            const errorDiv = document.getElementById('loginError');
+
+            errorDiv.textContent = '登录中...';
+
+            try {
+                const response = await fetch('/api/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username, password })
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    location.reload();
+                } else {
+                    errorDiv.textContent = data.error || '登录失败';
+                    // 使用 Toast 提示错误
+                    Modal.toast(data.error || '登录失败', 'error');
+                }
+            } catch (error) {
+                errorDiv.textContent = '网络错误，请稍后重试';
+                Modal.toast('网络错误，请稍后重试', 'error');
+            }
+        });
+
+
+        // 发送验证码逻辑
+        let countdownTimer = null;
+        const btnSendCode = document.getElementById('btnSendCode');
+        const regEmail = document.getElementById('regEmail');
+        const codeHint = document.getElementById('codeHint');
+
+        btnSendCode.addEventListener('click', async () => {
+            const email = regEmail.value.trim();
+
+            if (!email) {
+                Modal.toast('请先输入邮箱地址', 'warning');
+                regEmail.focus();
+                return;
+            }
+
+            // 简单的邮箱格式验证
+            const emailPattern = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+            if (!emailPattern.test(email)) {
+                Modal.toast('邮箱格式不正确', 'warning');
+                regEmail.focus();
+                return;
+            }
+
+            btnSendCode.disabled = true;
+            btnSendCode.textContent = '发送中...';
+
+            try {
+                const response = await fetch('/api/send-verification-code', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email })
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    Modal.toast('验证码已发送到您的邮箱', 'success');
+                    codeHint.textContent = '验证码已发送，有效期10分钟';
+                    codeHint.style.display = 'block';
+                    codeHint.style.color = '#28a745';
+
+                    // 开始60秒倒计时
+                    let countdown = 60;
+                    btnSendCode.textContent = `${countdown}秒后重试`;
+
+                    countdownTimer = setInterval(() => {
+                        countdown--;
+                        if (countdown > 0) {
+                            btnSendCode.textContent = `${countdown}秒后重试`;
+                        } else {
+                            clearInterval(countdownTimer);
+                            btnSendCode.disabled = false;
+                            btnSendCode.textContent = '发送验证码';
+                        }
+                    }, 1000);
+                } else {
+                    Modal.toast(data.error || '发送失败', 'error');
+                    btnSendCode.disabled = false;
+                    btnSendCode.textContent = '发送验证码';
+                }
+            } catch (error) {
+                Modal.toast('网络错误，请稍后重试', 'error');
+                btnSendCode.disabled = false;
+                btnSendCode.textContent = '发送验证码';
+            }
+        });
+
+        document.getElementById('registerForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const username = document.getElementById('regUsername').value;
+            const email = document.getElementById('regEmail').value.trim();
+            const verificationCode = document.getElementById('regVerificationCode').value.trim();
+            const password = document.getElementById('regPassword').value;
+            const confirmPassword = document.getElementById('regConfirmPassword').value;
+            const errorDiv = document.getElementById('registerError');
+
+            if (password !== confirmPassword) {
+                errorDiv.textContent = '两次输入的密码不一致';
+                Modal.toast('两次输入的密码不一致', 'warning');
+                return;
+            }
+
+            if (!verificationCode) {
+                errorDiv.textContent = '请输入邮箱验证码';
+                Modal.toast('请输入邮箱验证码', 'warning');
+                return;
+            }
+
+            errorDiv.textContent = '注册中...';
+
+            try {
+                const response = await fetch('/api/register', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username, email, password, verification_code: verificationCode })
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    // 使用自定义 Modal 提示成功
+                    await Modal.alert('注册成功', '您的账号已创建成功，请登录。', 'success');
+                    switchAuthMode('login');
+                    document.getElementById('loginUsername').value = username;
+                    document.getElementById('loginPassword').focus();
+                } else {
+                    errorDiv.textContent = data.error || '注册失败';
+                    Modal.toast(data.error || '注册失败', 'error');
+                }
+            } catch (error) {
+                errorDiv.textContent = '网络错误，请稍后重试';
+                Modal.toast('网络错误，请稍后重试', 'error');
+            }
+        });
+
+        // ========================================
+        // 充值模态框逻辑
+        // ========================================
+        const rechargeModalOverlay = document.getElementById('rechargeModalOverlay');
+        const btnRecharge = document.getElementById('btnRecharge');
+        const closeRechargeModal = document.getElementById('closeRechargeModal');
+        const btnRedeem = document.getElementById('btnRedeem');
+        const cardKeyInput = document.getElementById('cardKeyInput');
+
+        // 打开充值弹窗
+        if (btnRecharge) {
+            btnRecharge.addEventListener('click', () => {
+                rechargeModalOverlay.style.display = 'flex';
+                // 使用 setTimeout 确保 display 先生效，然后再触发过渡动画
+                setTimeout(() => {
+                    rechargeModalOverlay.classList.add('active');
+                }, 10);
+            });
+        }
+
+        // 关闭充值弹窗
+        function closeRechargeModalFunc() {
+            rechargeModalOverlay.classList.remove('active');
+            // 等待过渡动画结束后隐藏元素
+            setTimeout(() => {
+                rechargeModalOverlay.style.display = 'none';
+            }, 300);
+        }
+
+        if (closeRechargeModal) {
+            closeRechargeModal.addEventListener('click', closeRechargeModalFunc);
+        }
+
+        // 点击遮罩关闭
+        if (rechargeModalOverlay) {
+            rechargeModalOverlay.addEventListener('click', (e) => {
+                if (e.target === rechargeModalOverlay) {
+                    closeRechargeModalFunc();
+                }
+            });
+        }
+
+        // 使用卡密充值
+        if (btnRedeem) {
+            btnRedeem.addEventListener('click', async () => {
+                const code = cardKeyInput.value.trim();
+
+                if (!code) {
+                    Modal.toast('请输入卡密', 'warning');
+                    cardKeyInput.focus();
+                    return;
+                }
+
+                btnRedeem.disabled = true;
+                btnRedeem.textContent = '充值中...';
+
+                try {
+                    const response = await fetch('/api/redeem', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ code })
+                    });
+
+                    const data = await response.json();
+
+                    if (response.ok) {
+                        Modal.toast(data.message, 'success');
+                        // 更新点数显示
+                        const creditEl = document.getElementById('userCredits');
+                        if (creditEl) {
+                            creditEl.textContent = `🪙 ${data.new_credits} 点`;
+                        }
+                        // 关闭弹窗并清空输入
+                        cardKeyInput.value = '';
+                        closeRechargeModalFunc();
+                    } else {
+                        Modal.toast(data.error || '充值失败', 'error');
+                    }
+                } catch (error) {
+                    Modal.toast('网络错误，请稍后重试', 'error');
+                } finally {
+                    btnRedeem.disabled = false;
+                    btnRedeem.textContent = '确认充值';
+                }
+            });
+        }
+
+        // 回车提交卡密
+        if (cardKeyInput) {
+            cardKeyInput.addEventListener('keyup', (e) => {
+                if (e.key === 'Enter') {
+                    btnRedeem.click();
+                }
+            });
+        }
+    </script>
+</body>
+
+</html>

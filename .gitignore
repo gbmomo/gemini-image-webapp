@@ -1,0 +1,42 @@
+# 环境变量文件，不要提交到Git
+.env
+
+# Python 缓存
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# 数据库和数据文件
+data/
+*.db
+*.sqlite
+*.sqlite3
+
+# 上传的图片
+static/images/
+static/thumbnails/
+
+# 日志文件
+*.log
+
+# IDE 配置
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# 操作系统文件
+.DS_Store
+Thumbs.db
+
+# 虚拟环境
+venv/
+env/
+ENV/
+
+# Docker
+docker-compose.override.yml
+
+# 生产环境配置（包含敏感域名和路径）
+improved_openresty.conf

@@ -1,0 +1,639 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>管理员控制台 - Nano Banana Pro</title>
+    <link rel="icon" href="/static/logo.ico" type="image/x-icon">
+    <link rel="stylesheet" href="/static/css/style.css">
+    <link href="/static/fonts/inter.css" rel="stylesheet">
+</head>
+
+<body class="admin-page">
+    <div class="admin-container">
+        <!-- 顶部标题栏 -->
+        <header class="admin-header">
+            <div class="admin-title-section">
+                <h1 class="admin-title">🛡️ 管理员控制台</h1>
+                <p class="admin-subtitle">用户管理与数据监控</p>
+            </div>
+            <div class="admin-actions">
+                <a href="/" class="btn-back">← 返回主页</a>
+                <a href="/api/logout" class="btn-logout">退出登录</a>
+            </div>
+        </header>
+
+        <!-- 统计卡片 -->
+        <div class="stats-grid">
+            <!-- (existing cards) -->
+            <div class="stat-card">
+                <div class="stat-icon">👥</div>
+                <div class="stat-info">
+                    <span class="stat-value" id="totalUsers">-</span>
+                    <span class="stat-label">总用户数</span>
+                </div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon">💬</div>
+                <div class="stat-info">
+                    <span class="stat-value" id="totalSessions">-</span>
+                    <span class="stat-label">总会话数</span>
+                </div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon">📝</div>
+                <div class="stat-info">
+                    <span class="stat-value" id="totalMessages">-</span>
+                    <span class="stat-label">总消息数</span>
+                </div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon">🔐</div>
+                <div class="stat-info">
+                    <span class="stat-value" id="totalAdmins">-</span>
+                    <span class="stat-label">管理员数</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- 数据清理 -->
+        <div class="admin-section">
+            <h2 class="section-title">数据清理</h2>
+            <div class="cleanup-controls">
+                <div class="cleanup-group">
+                    <p class="cleanup-desc">快速清理：清理7天前的所有数据（包含图片、缩略图、孤儿文件）</p>
+                    <button class="btn-cleanup btn-warning" onclick="cleanupData(7)">🗑️ 清理7天前数据</button>
+                </div>
+                <div class="cleanup-group">
+                    <p class="cleanup-desc">自定义清理：清理指定日期前的所有数据（包含图片、缩略图、孤儿文件）</p>
+                    <div class="date-cleanup-input">
+                        <input type="date" id="cleanupDate" class="date-input">
+                        <button class="btn-cleanup btn-danger" onclick="cleanupDataCustom()">🗑️ 执行清理</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 卡密管理 -->
+        <div class="admin-section">
+            <h2 class="section-title">🔑 卡密管理</h2>
+            <div class="card-key-controls">
+                <div class="card-key-form">
+                    <div class="form-row">
+                        <div class="form-group-inline">
+                            <label>每张点数</label>
+                            <input type="number" id="cardKeyCredits" class="form-input" value="10" min="1" max="10000">
+                        </div>
+                        <div class="form-group-inline">
+                            <label>生成数量</label>
+                            <input type="number" id="cardKeyCount" class="form-input" value="10" min="1" max="100">
+                        </div>
+                        <button class="btn-generate-keys" onclick="generateCardKeys()">🎫 生成卡密</button>
+                    </div>
+                </div>
+                <div
+                    style="margin-top: 12px; padding: 12px; background: rgba(245, 158, 11, 0.1); border-left: 3px solid #f59e0b; border-radius: 8px;">
+                    <p style="font-size: 0.85rem; color: #f59e0b; margin: 0;">
+                        <strong>🔒 安全提示：</strong>卡密使用哈希加密存储，生成后<strong>只显示一次</strong>，请立即保存！
+                    </p>
+                </div>
+                <div class="card-key-table-container">
+                    <table class="user-table card-key-table">
+                        <thead>
+                            <tr>
+                                <th>卡密码</th>
+                                <th>点数</th>
+                                <th>状态</th>
+                                <th>使用者</th>
+                                <th>创建时间</th>
+                                <th>操作</th>
+                            </tr>
+                        </thead>
+                        <tbody id="cardKeyTableBody">
+                            <tr>
+                                <td colspan="6" class="loading-cell">加载中...</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- 用户列表 -->
+        <div class="admin-section">
+            <h2 class="section-title">用户列表</h2>
+            <div class="user-table-container">
+                <table class="user-table">
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>用户名</th>
+                            <th>角色</th>
+                            <th>点数</th>
+                            <th>会话数</th>
+                            <th>消息数</th>
+                            <th>注册时间</th>
+
+                            <th>操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="userTableBody">
+                        <tr>
+                            <td colspan="7" class="loading-cell">加载中...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- 用户会话详情模态框 (Master-Detail Layout) -->
+        <div class="modal" id="sessionModal" hidden>
+            <div class="modal-backdrop" onclick="closeSessionModal()"></div>
+            <div class="modal-content modal-large-xl">
+                <div class="modal-header">
+                    <h3 id="modalTitle">用户会话详情</h3>
+                    <button class="modal-close" onclick="closeSessionModal()">×</button>
+                </div>
+                <div class="modal-body" id="sessionModalBody" style="padding: 0; overflow: hidden;">
+                    <!-- Content will be injected here -->
+                    <div class="session-viewer-container">
+                        <div class="session-viewer-sidebar">
+                            <div class="session-viewer-sidebar-header">
+                                会话列表
+                            </div>
+                            <div class="session-viewer-list" id="sessionSidebarList">
+                                <!-- List Items -->
+                            </div>
+                        </div>
+                        <div class="session-viewer-main">
+                            <div class="session-viewer-content" id="sessionMainContent">
+                                <!-- Chat Content -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 图片预览模态框 (Lightbox) -->
+        <div class="image-modal" id="adminImageModal" hidden>
+            <div class="modal-backdrop" onclick="closeImagePreview()"></div>
+            <div class="modal-content">
+                <img id="adminModalImage" src="" alt="大图预览">
+                <div class="modal-actions">
+                    <a class="btn-download" id="adminBtnDownload" download>
+                        <span>📥</span> 下载图片
+                    </a>
+                    <button class="btn-close-modal" onclick="closeImagePreview()">✕</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 引入自定义 Modal 样式 -->
+    <link rel="stylesheet" href="/static/css/modal.css">
+    <!-- 引入自定义 Modal 脚本 -->
+    <script src="/static/js/modal.js"></script>
+
+    <script>
+        let users = [];
+        let currentSessions = []; // Store current user sessions
+
+        // 加载用户数据
+        async function loadUsers() {
+            try {
+                const response = await fetch('/api/admin/users');
+                if (response.ok) {
+                    users = await response.json();
+                    renderUsers();
+                    updateStats();
+                } else if (response.status === 401) {
+                    window.location.href = '/login';
+                } else if (response.status === 403) {
+                    await Modal.alert('权限错误', '您没有管理员权限', 'error');
+                    window.location.href = '/';
+                }
+            } catch (error) {
+                console.error('加载用户失败:', error);
+                Modal.toast('加载用户数据失败', 'error');
+            }
+        }
+
+        // 渲染用户表格
+        function renderUsers() {
+            const tbody = document.getElementById('userTableBody');
+            if (users.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="7" class="empty-cell">暂无用户</td></tr>';
+                return;
+            }
+
+            tbody.innerHTML = users.map(user => `
+                <tr class="${user.is_admin ? 'admin-row' : ''}">
+                    <td>${user.id}</td>
+                    <td>
+                        <span class="username">${user.username}</span>
+                        ${user.username === 'admin' ? '<span class="badge badge-primary">主管理员</span>' : ''}
+                    </td>
+                    <td>
+                        <span class="badge ${user.is_admin ? 'badge-admin' : 'badge-user'}">
+                            ${user.is_admin ? '管理员' : '普通用户'}
+                        </span>
+                    </td>
+                    <td>${user.credits !== undefined ? user.credits : '-'}</td>
+                    <td>${user.session_count || 0}</td>
+                    <td>${user.message_count || 0}</td>
+                    <td>${formatDate(user.created_at)}</td>
+                    <td class="action-cell">
+                        <button class="btn-action btn-view" onclick="viewSessions(${user.id}, '${user.username}')">
+                            查看会话
+                        </button>
+                        ${user.username !== 'admin' ? `
+                            <button class="btn-action btn-toggle" onclick="toggleAdmin(${user.id})">
+                                ${user.is_admin ? '取消管理员' : '设为管理员'}
+                            </button>
+                            <button class="btn-action btn-view" onclick="addCredits(${user.id}, '${user.username}')">
+                                充值
+                            </button>
+                            <button class="btn-action btn-delete" onclick="deleteUser(${user.id}, '${user.username}')">
+                                删除
+                            </button>
+                        ` : ''}
+                    </td>
+                </tr>
+            `).join('');
+        }
+
+        // 更新统计数据
+        function updateStats() {
+            document.getElementById('totalUsers').textContent = users.length;
+            document.getElementById('totalSessions').textContent = users.reduce((sum, u) => sum + (u.session_count || 0), 0);
+            document.getElementById('totalMessages').textContent = users.reduce((sum, u) => sum + (u.message_count || 0), 0);
+            document.getElementById('totalAdmins').textContent = users.filter(u => u.is_admin).length;
+        }
+
+        // 格式化日期
+        function formatDate(dateStr) {
+            if (!dateStr) return '-';
+            const date = new Date(dateStr);
+            return date.toLocaleString('zh-CN', {
+                year: 'numeric',
+                month: '2-digit',
+                day: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit'
+            });
+        }
+
+        // 查看用户会话
+        async function viewSessions(userId, username) {
+            document.getElementById('modalTitle').textContent = `${username} 的会话记录`;
+            document.getElementById('sessionModal').hidden = false;
+
+            // Reset UI
+            const sidebarList = document.getElementById('sessionSidebarList');
+            const mainContent = document.getElementById('sessionMainContent');
+            sidebarList.innerHTML = '<div style="padding:10px; color:var(--text-muted)">加载中...</div>';
+            mainContent.innerHTML = '';
+
+            try {
+                const response = await fetch(`/api/admin/users/${userId}/sessions`);
+                currentSessions = await response.json();
+
+                if (currentSessions.length === 0) {
+                    sidebarList.innerHTML = '<div style="padding:10px; color:var(--text-muted)">暂无会话</div>';
+                    renderEmptyState();
+                    return;
+                }
+
+                renderSessionList();
+                // Select first session by default
+                if (currentSessions.length > 0) {
+                    selectSession(currentSessions[0].id);
+                }
+
+            } catch (error) {
+                sidebarList.innerHTML = '<div style="padding:10px; color:var(--error)">加载完全失败</div>';
+                Modal.toast('加载会话失败', 'error');
+            }
+        }
+
+        function renderSessionList() {
+            const sidebarList = document.getElementById('sessionSidebarList');
+            sidebarList.innerHTML = currentSessions.map(session => `
+                <div class="session-list-item" id="session-item-${session.id}" onclick="selectSession('${session.id}')">
+                    <div class="session-list-item-title">${session.title || '新对话'}</div>
+                    <div class="session-list-item-date">${formatDate(session.updated_at)} · ${session.messages.length} 条消息</div>
+                </div>
+            `).join('');
+        }
+
+        function selectSession(sessionId) {
+            // Update active state in sidebar
+            document.querySelectorAll('.session-list-item').forEach(el => el.classList.remove('active'));
+            const activeItem = document.getElementById(`session-item-${sessionId}`);
+            if (activeItem) activeItem.classList.add('active');
+
+            // Render messages
+            const session = currentSessions.find(s => s.id === sessionId);
+            const mainContent = document.getElementById('sessionMainContent');
+
+            if (!session || !session.messages || session.messages.length === 0) {
+                mainContent.innerHTML = `
+                    <div class="viewer-empty">
+                        <div class="viewer-empty-icon">💬</div>
+                        <p>此会话暂无消息</p>
+                    </div>
+                `;
+                return;
+            }
+
+            mainContent.innerHTML = session.messages.map(msg => `
+                <div class="viewer-message ${msg.role}">
+                    <div class="viewer-avatar">${msg.role === 'user' ? '👤' : '🤖'}</div>
+                    <div class="viewer-content-wrapper">
+                         <div class="viewer-bubble">
+                            ${msg.content || ''}
+                            ${msg.image ? `<img src="${msg.thumbnail || msg.image}" class="viewer-image" alt="生成图片" onclick="openImagePreview('${msg.image}')">` : ''}
+                        </div>
+                         <!-- Reference Images -->
+                         ${msg.reference_images ? `
+                            <div style="margin-top: 5px; display: flex; gap: 5px; flex-wrap: wrap;">
+                                ${msg.reference_images.map(ref => `
+                                    <img src="/static/images/${ref}" style="width: 40px; height: 40px; border-radius: 4px; object-fit: cover; border: 1px solid rgba(255,255,255,0.1);">
+                                `).join('')}
+                            </div>
+                         ` : ''}
+                    </div>
+                </div>
+            `).join('');
+
+            // Scroll to bottom
+            setTimeout(() => {
+                mainContent.scrollTop = mainContent.scrollHeight;
+            }, 0);
+        }
+
+        function renderEmptyState() {
+            const mainContent = document.getElementById('sessionMainContent');
+            mainContent.innerHTML = `
+                <div class="viewer-empty">
+                    <div class="viewer-empty-icon">📂</div>
+                    <p>请在左侧选择一个会话查看详情</p>
+                </div>
+            `;
+        }
+
+        // 关闭会话模态框
+        function closeSessionModal() {
+            document.getElementById('sessionModal').hidden = true;
+        }
+
+        // 切换管理员状态
+        async function toggleAdmin(userId) {
+            try {
+                const response = await fetch(`/api/admin/users/${userId}/toggle-admin`, {
+                    method: 'POST'
+                });
+                const data = await response.json();
+                if (response.ok) {
+                    Modal.toast(`操作成功`, 'success');
+                    loadUsers();
+                } else {
+                    Modal.alert('操作失败', data.error || '未知错误', 'error');
+                }
+            } catch (error) {
+                Modal.alert('网络错误', '无法连接到服务器', 'error');
+            }
+        }
+
+        // 删除用户
+        async function deleteUser(userId, username) {
+            const confirmed = await Modal.confirm('删除用户', `确定要删除用户 "${username}" 吗？<br>此操作不可恢复，将删除该用户的所有数据！`, 'warning');
+            if (!confirmed) {
+                return;
+            }
+
+            try {
+                const response = await fetch(`/api/admin/users/${userId}`, {
+                    method: 'DELETE'
+                });
+                const data = await response.json();
+                if (response.ok) {
+                    Modal.toast(`用户 ${username} 已删除`, 'success');
+                    loadUsers();
+                } else {
+                    Modal.alert('删除失败', data.error || '未知错误', 'error');
+                }
+            } catch (error) {
+                Modal.alert('网络错误', '无法连接到服务器', 'error');
+            }
+        }
+
+        // 给用户充值
+        async function addCredits(userId, username) {
+            const amountStr = await Modal.prompt('点数充值', `请输入要给用户 "${username}" 充值的点数（负数表示扣除）：`, '10');
+            if (amountStr === null) return;
+
+            const amount = parseInt(amountStr);
+            if (isNaN(amount) || amount === 0) {
+                Modal.toast('请输入有效的数字', 'warning');
+                return;
+            }
+
+            try {
+                const response = await fetch(`/api/admin/users/${userId}/credits`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ amount })
+                });
+                const data = await response.json();
+
+                if (response.ok) {
+                    await Modal.alert('充值成功', `充值成功！用户现有 ${data.new_credits} 点`, 'success');
+                    loadUsers();
+                } else {
+                    Modal.alert('充值失败', data.error || '操作失败', 'error');
+                }
+            } catch (error) {
+                Modal.alert('网络错误', '无法连接到服务器', 'error');
+            }
+        }
+
+        // 数据清理函数
+        async function cleanupData(days) {
+            const confirmed = await Modal.confirm('数据清理', `确定要清理 ${days} 天前的所有数据吗？<br>此操作无法撤销！`, 'warning');
+            if (!confirmed) {
+                return;
+            }
+
+            const date = new Date();
+            date.setDate(date.getDate() - days);
+            const cutoffDate = date.toISOString().split('T')[0]; // YYYY-MM-DD
+
+            await performCleanup(cutoffDate);
+        }
+
+        async function cleanupDataCustom() {
+            const dateInput = document.getElementById('cleanupDate');
+            const cutoffDate = dateInput.value;
+
+            if (!cutoffDate) {
+                Modal.toast('请选择日期', 'warning');
+                return;
+            }
+
+            const confirmed = await Modal.confirm('自定义清理', `确定要清理 ${cutoffDate} 之前的所有数据吗？<br>此操作无法撤销！`, 'warning');
+            if (!confirmed) {
+                return;
+            }
+
+            await performCleanup(cutoffDate);
+        }
+
+        async function performCleanup(cutoffDate) {
+            try {
+                const response = await fetch('/api/admin/cleanup', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ cutoff_date: cutoffDate })
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    const stats = data.deleted_stats;
+                    let message = `清理完成！\n删除消息数: ${stats.messages}\n删除图片数: ${stats.images}\n删除空会话数: ${stats.sessions}`;
+                    if (stats.orphan_images > 0 || stats.orphan_thumbnails > 0) {
+                        message += `\n\n孤儿文件清理:\n- 孤儿图片: ${stats.orphan_images} 个\n- 孤儿缩略图: ${stats.orphan_thumbnails} 个`;
+                    }
+                    await Modal.alert('清理完成', message, 'success');
+                    loadUsers(); // 刷新数据
+                } else {
+                    Modal.alert('清理失败', data.error || '操作失败', 'error');
+                }
+            } catch (error) {
+                Modal.alert('网络错误', '无法连接到服务器', 'error');
+            }
+        }
+
+        // 图片预览功能
+        function openImagePreview(imageSrc) {
+            const modal = document.getElementById('adminImageModal');
+            const img = document.getElementById('adminModalImage');
+            const downloadBtn = document.getElementById('adminBtnDownload');
+
+            img.src = imageSrc;
+            downloadBtn.href = imageSrc;
+            modal.hidden = false;
+        }
+
+        function closeImagePreview() {
+            document.getElementById('adminImageModal').hidden = true;
+        }
+
+        // ========================================
+        // 卡密管理功能
+        // ========================================
+        let cardKeys = [];
+
+        async function loadCardKeys() {
+            try {
+                const response = await fetch('/api/admin/card-keys');
+                if (response.ok) {
+                    cardKeys = await response.json();
+                    renderCardKeys();
+                }
+            } catch (error) {
+                console.error('加载卡密失败:', error);
+            }
+        }
+
+        function renderCardKeys() {
+            const tbody = document.getElementById('cardKeyTableBody');
+            if (cardKeys.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="6" class="empty-cell">暂无卡密</td></tr>';
+                return;
+            }
+
+            tbody.innerHTML = cardKeys.map(key => `
+                <tr class="${key.is_used ? 'used-row' : ''}">
+                    <td>
+                        <code class="card-key-code">${key.code_prefix}****-****-****</code>
+                    </td>
+                    <td><span class="credits-badge">🪙 ${key.credits}</span></td>
+                    <td>
+                        <span class="badge ${key.is_used ? 'badge-used' : 'badge-available'}">
+                            ${key.is_used ? '已使用' : '可用'}
+                        </span>
+                    </td>
+                    <td>${key.used_by_username || '-'}</td>
+                    <td>${formatDate(key.created_at)}</td>
+                    <td>-</td>
+                </tr>
+            `).join('');
+        }
+
+        async function generateCardKeys() {
+            const credits = parseInt(document.getElementById('cardKeyCredits').value);
+            const count = parseInt(document.getElementById('cardKeyCount').value);
+
+            if (isNaN(credits) || credits <= 0) {
+                Modal.toast('请输入有效的点数', 'warning');
+                return;
+            }
+            if (isNaN(count) || count <= 0 || count > 100) {
+                Modal.toast('数量必须在1-100之间', 'warning');
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/admin/card-keys', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ credits, count })
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    // 显示生成的卡密（只显示一次）
+                    const keysHTML = data.keys.map(key => `
+                        <div style="margin-bottom: 8px; padding: 10px; background: rgba(139, 92, 246, 0.1); border-radius: 8px;">
+                            <code style="font-size: 1rem; font-weight: 600; color: var(--accent-purple-light); letter-spacing: 1px;">${key.code}</code>
+                            <button onclick="navigator.clipboard.writeText('${key.code}').then(() => Modal.toast('已复制', 'success'))" style="margin-left: 10px; padding: 4px 8px; background: rgba(99, 102, 241, 0.2); color: var(--accent-blue); border: none; border-radius: 4px; cursor: pointer; font-size: 0.8rem;">📋 复制</button>
+                        </div>
+                    `).join('');
+
+                    await Modal.alert(
+                        '🎫 卡密生成成功',
+                        `<div style="max-height: 400px; overflow-y: auto;">
+                            <p style="color: #f59e0b; font-weight: 600; margin-bottom: 12px;">⚠️ 请立即保存这些卡密，关闭后将无法再查看完整卡密！</p>
+                            ${keysHTML}
+                        </div>`,
+                        'success'
+                    );
+                    loadCardKeys();
+                } else {
+                    Modal.alert('生成失败', data.error || '操作失败', 'error');
+                }
+            } catch (error) {
+                Modal.alert('网络错误', '无法连接到服务器', 'error');
+            }
+        }
+
+        function copyCardKey(code) {
+            navigator.clipboard.writeText(code).then(() => {
+                Modal.toast('卡密已复制到剪贴板', 'success');
+            }).catch(() => {
+                Modal.toast('复制失败，请手动复制', 'error');
+            });
+        }
+
+        // 初始化
+        loadUsers();
+        loadCardKeys();
+    </script>
+</body>
+
+</html>
