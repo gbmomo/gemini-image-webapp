@@ -18,6 +18,8 @@
 </p>
 
 <p align="center">
+  <img src="https://img.shields.io/github/stars/gbmomo/gemini-image-webapp?style=flat-square" alt="Stars">
+  <img src="https://img.shields.io/github/forks/gbmomo/gemini-image-webapp?style=flat-square" alt="Forks">
   <img src="https://img.shields.io/badge/Python-3.10%2B-blue.svg" alt="Python">
   <img src="https://img.shields.io/badge/Flask-3.0%2B-green.svg" alt="Flask">
   <img src="https://img.shields.io/badge/Gemini-3.0_Pro-orange.svg" alt="Gemini">
@@ -86,7 +88,7 @@
 | **高分辨率** | 支持 1K、2K、4K 三种分辨率 |
 | **多纵横比** | 1:1、16:9、9:16、4:3、21:9 等多种比例 |
 
-### � 完整的用户系统
+### 👥 完整的用户系统
 | 功能 | 描述 |
 |------|------|
 | **用户注册** | 邮箱验证码注册，防止滥用 |
@@ -114,16 +116,16 @@
 
 ---
 
-## � 快速开始（5 分钟部署）
+## 🚀 快速开始（5 分钟部署）
 
 ### 第一步：获取项目代码
 
 ```bash
 # 克隆仓库
-git clone https://github.com/your-username/nano-banana-pro.git
+git clone https://github.com/gbmomo/gemini-image-webapp.git
 
 # 进入项目目录
-cd nano-banana-pro
+cd gemini-image-webapp
 ```
 
 ### 第二步：安装 Python 环境
@@ -226,7 +228,7 @@ python app.py
 
 ---
 
-## � 详细使用教程
+## 📖 详细使用教程
 
 ### 👤 普通用户使用流程
 
@@ -358,7 +360,7 @@ python app.py
 ## 📁 项目结构说明
 
 ```
-nano-banana-pro/
+gemini-image-webapp/
 │
 ├── 📄 app.py                 # 主程序入口（Flask 应用）
 ├── 📄 database.py            # 数据库操作（用户、卡密等）
@@ -496,23 +498,9 @@ GEMINI_API_BASE_URL=http://你的代理地址:端口
 
 ---
 
-## 🤝 贡献代码
+## 📢 反馈
 
-欢迎提交 Issue 和 Pull Request！
-
-```bash
-# 1. Fork 本仓库
-# 2. 创建你的特性分支
-git checkout -b feature/AmazingFeature
-
-# 3. 提交你的更改
-git commit -m 'Add some AmazingFeature'
-
-# 4. 推送到分支
-git push origin feature/AmazingFeature
-
-# 5. 开启一个 Pull Request
-```
+如有问题或建议，欢迎提交 [Issue](https://github.com/gbmomo/gemini-image-webapp/issues)！
 
 ---
 
