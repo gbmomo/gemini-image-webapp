@@ -1,4 +1,4 @@
-# 🍌 Nano Banana Pro - 私有化 AI 图片生成平台
+# 基于调用🍌Gemini Nano Banana api 的私有化 AI 图片生成平台
 
 <p align="center">
   <img src="static/logo.ico" alt="Logo" width="120" height="120">
@@ -22,7 +22,6 @@
   <img src="https://img.shields.io/github/forks/gbmomo/gemini-image-webapp?style=flat-square" alt="Forks">
   <img src="https://img.shields.io/badge/Python-3.10%2B-blue.svg" alt="Python">
   <img src="https://img.shields.io/badge/Flask-3.0%2B-green.svg" alt="Flask">
-  <img src="https://img.shields.io/badge/Gemini-3.0_Pro-orange.svg" alt="Gemini">
   <img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License">
 </p>
 
@@ -59,7 +58,7 @@
 
 ## 🎯 这是什么？
 
-**Nano Banana Pro** 是一个开箱即用的 AI 图片生成网站系统。基于 Google 最新的 Gemini 3 Pro 图像生成模型，让你可以快速搭建一个属于自己的 AI 绘图平台。
+**gemini-image-webapp** 是一个开箱即用的 AI 图片生成网站系统。基于 Google Gemini 图像生成模型，让你可以快速搭建一个属于自己的 AI 绘图平台。
 
 **适合人群：**
 - 🎨 想要拥有私有 AI 绘图网站的个人或团队
@@ -193,8 +192,8 @@ ADMIN_PASSWORD=你的管理员密码
 
 # ========== 可选配置 ==========
 
-# 使用的 Gemini 模型（默认 gemini-3-pro-image-preview）
-# 可选：gemini-3-pro-image-preview, gemini-2.5-flash-image 等
+# 使用的 Gemini 模型（默认使用最新的 gemini-3-pro-image-preview）
+# 如果未来有新模型发布，可以在此修改模型名称
 # GEMINI_MODEL=gemini-3-pro-image-preview
 
 # 如果你需要邮箱验证码注册功能，请配置以下内容：
