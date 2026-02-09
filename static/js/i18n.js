@@ -47,7 +47,7 @@ const translations = {
         prompt_label: '提示词',
         prompt_placeholder: '例如：一只可爱的小猫咪坐在花园里，油画风格，高清，细节丰富',
         aspect_resolution: '纵横比 & 分辨率',
-        resolution_label: '分辨率(不同分辨率消耗金币数目不同)',
+        resolution_label: '分辨率(不同分辨率消耗点数数目不同)',
         aspect_ratio_label: '纵横比',
         aspect_auto: 'auto 自适应',
         aspect_square: '1:1 方形',

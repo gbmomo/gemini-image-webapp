@@ -3,7 +3,7 @@
 
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title data-i18n="page_title">码言旗下Nano Banana Pro AI图片生成器</title>
     <link rel="icon" href="/static/logo.ico" type="image/x-icon">
     <link rel="stylesheet" href="/static/css/style.css">
@@ -134,7 +134,7 @@
 
                     <!-- 分辨率 -->
                     <div class="option-group" id="resolutionGroup">
-                        <label class="option-label" data-i18n="resolution_label">分辨率(不同分辨率消耗金币数目不同)</label>
+                        <label class="option-label" data-i18n="resolution_label">分辨率(不同分辨率消耗点数数目不同)</label>
                         <div class="option-buttons" id="resolutionButtons">
                             <button class="option-btn resolution-btn active" data-value="1K">
                                 <span class="res-label">1K</span>
@@ -330,9 +330,9 @@
                         <div style="display: flex; gap: 10px;">
                             <input type="text" id="regVerificationCode" required
                                 data-i18n-placeholder="code_placeholder" placeholder="请输入邮箱验证码" maxlength="6"
-                                style="flex: 1;">
-                            <button type="button" class="btn-send-code" id="btnSendCode"
-                                data-i18n="send_code">发送验证码</button>
+                                style="flex: 1; min-width: 80px;">
+                            <button type="button" class="btn-send-code" id="btnSendCode" data-i18n="send_code"
+                                style="flex-shrink: 0;">发送验证码</button>
                         </div>
                         <small id="codeHint"
                             style="color: #666; font-size: 12px; display: none; margin-top: 5px;"></small>

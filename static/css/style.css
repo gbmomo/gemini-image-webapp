@@ -73,16 +73,22 @@
     display: none !important;
 }
 
+html {
+    overflow-x: hidden;
+}
+
 body {
     font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
     background: var(--bg-primary);
     color: var(--text-primary);
     line-height: 1.6;
     overflow: hidden;
+    overflow-x: hidden;
     /* Flexbox layout for main structure */
     display: flex;
     flex-direction: column;
     height: 100vh;
+    max-width: 100vw;
 }
 
 /* 管理员页面允许滚动 */
@@ -355,7 +361,12 @@ body.admin-page {
 }
 
 .lang-btn {
-    padding: 4px 10px;
+    width: 32px;
+    height: 26px;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
     background: transparent;
     border: none;
     color: var(--text-muted);
@@ -1742,7 +1753,8 @@ body.admin-page {
     border: 1px solid var(--border-color);
     border-radius: var(--radius-md);
     color: var(--text-primary);
-    font-size: 0.95rem;
+    font-size: 16px;
+    /* 16px prevents iOS auto-zoom on input focus */
     transition: all var(--transition-normal);
 }
 
@@ -2404,7 +2416,8 @@ body.admin-page {
     align-items: center;
     justify-content: center;
     overflow-y: auto;
-    /* 允许垂直滚动 */
+    overflow-x: hidden;
+    /* 允许垂直滚动，禁止水平滚动 */
     padding: 20px 0;
     /* 给上下留出空间 */
 }
@@ -2429,7 +2442,8 @@ body.admin-page {
     max-height: 90vh;
     /* 限制最大高度 */
     overflow-y: auto;
-    /* 内容过多时内部滚动 */
+    overflow-x: hidden;
+    /* 内容过多时内部滚动，禁止水平滚动 */
 }
 
 @keyframes slideUp {
