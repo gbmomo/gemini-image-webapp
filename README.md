@@ -1,4 +1,8 @@
-# 基于调用🍌Gemini Nano Banana api 的私有化 AI 图片生成平台
+# 基于调用🍌Gemini Nano Banana api 的私有化 AI 图片生成网站源码
+
+<p align="center">
+  <b>简体中文</b> | <a href="README_EN.md">English</a>
+</p>
 
 <p align="center">
   <img src="static/logo.ico" alt="Logo" width="120" height="120">
@@ -13,7 +17,7 @@
 </p>
 
 <p align="center">
-  只需填入 Google Gemini API Key，即可搭建一个功能完整的 AI 图片生成平台<br>
+  只需填入 Google Gemini API Key，即可搭建一个功能完整的 AI 图片生成网站源码<br>
   支持用户注册、点数系统、多轮对话、图生图等丰富功能
 </p>
 
@@ -22,8 +26,18 @@
   <img src="https://img.shields.io/github/forks/gbmomo/gemini-image-webapp?style=flat-square" alt="Forks">
   <img src="https://img.shields.io/badge/Python-3.10%2B-blue.svg" alt="Python">
   <img src="https://img.shields.io/badge/Flask-3.0%2B-green.svg" alt="Flask">
-  <img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License">
+  <img src="https://img.shields.io/badge/License-CC%20BY--NC--SA%204.0-lightgrey.svg" alt="License">
 </p>
+
+> ⚠️ **许可证声明**：本项目采用 [CC BY-NC-SA 4.0](LICENSE) 许可证，使用本项目需遵守以下条款：
+> 
+> | 条款 | 要求 |
+> |------|------|
+> | **署名 (BY)** | 必须注明原作者 [@gbmomo](https://github.com/gbmomo) 并提供[原项目链接](https://github.com/gbmomo/gemini-image-webapp) |
+> | **非商业性 (NC)** | ❌ **严禁任何形式的商业使用**，如需商用请联系作者购买商用许可 |
+> | **相同方式共享 (SA)** | 修改后的作品必须以相同的 CC BY-NC-SA 4.0 许可证发布 |
+> 
+> 📧 商用授权联系：S@gitsay.com | QQ: 550948321 | 微信: Goblin_MoMo
 
 ---
 
@@ -32,26 +46,26 @@
 ### 登录与注册
 
 <p align="center">
-  <img src="Display pictures/登录界面.png" alt="登录界面" width="45%">
-  <img src="Display pictures/注册页面.png" alt="注册页面" width="45%">
+  <img src="Display pictures/中文/登录界面.png" alt="登录界面" width="45%">
+  <img src="Display pictures/中文/注册页面.png" alt="注册页面" width="45%">
 </p>
 
 ### 网站首页
 
 <p align="center">
-  <img src="Display pictures/网站首页（未生成之前）.png" alt="网站首页" width="80%">
+  <img src="Display pictures/中文/网站首页（未生成之前）.png" alt="网站首页" width="80%">
 </p>
 
 ### AI 图片生成效果
 
 <p align="center">
-  <img src="Display pictures/网站首页（生成图片的效果）.png" alt="生成图片效果" width="80%">
+  <img src="Display pictures/中文/网站首页（生成图片的效果）.png" alt="生成图片效果" width="80%">
 </p>
 
 ### 管理员后台
 
 <p align="center">
-  <img src="Display pictures/管理员后台首页.png" alt="管理员后台" width="80%">
+  <img src="Display pictures/中文/管理员后台首页.png" alt="管理员后台" width="80%">
 </p>
 
 ---
@@ -86,6 +100,7 @@
 | **多参考图** | 支持同时上传最多 14 张参考图片 |
 | **高分辨率** | 支持 1K、2K、4K 三种分辨率 |
 | **多纵横比** | 1:1、16:9、9:16、4:3、21:9 等多种比例 |
+| **多语言支持** | 支持中英文切换，可配置默认语言 |
 
 ### 👥 完整的用户系统
 | 功能 | 描述 |
@@ -112,6 +127,45 @@
 - Session 安全配置
 - 路径遍历攻击防护
 - 生产环境 HTTPS 强制
+- 敏感数据加密存储
+
+### 🛡️ 数据安全声明
+**安全声明: 本应用所有数据（用户账号、对话记录、图片等）均加密存储于您部署环境的本地 SQLite 数据库中。**
+
+- 我们不会上传任何数据至第三方服务器
+- 您完全掌控自己的数据隐私
+- 敏感信息（如 API Key、密码）均经过哈希加密处理
+
+### 🌐 国际化支持
+- 支持中文/英文界面一键切换
+- 自动检测浏览器语言偏好
+- 支持自定义默认语言配置
+
+---
+
+## 🌐 国际化配置
+
+本系统支持多语言切换（目前支持中文和英文）。
+
+### 切换默认语言
+
+默认语言配置在 `static/js/i18n.js` 文件中。你可以修改 `DEFAULT_LANG` 变量来更改默认语言：
+
+1. 打开 `static/js/i18n.js` 文件
+2. 找到配置项区域：
+
+```javascript
+// ========================================
+// 配置项 - 可以在这里修改默认语言
+// ========================================
+const DEFAULT_LANG = 'zh';  // 默认语言: 'zh' (中文) 或 'en' (英文)
+```
+
+3. 将 `'zh'` 修改为 `'en'` 即可将默认语言设置为英文。
+
+### 添加新语言
+
+如果有开发能力，你可以在 `static/js/i18n.js` 的 `translations` 对象中添加新的语言包，并在 `index.html` 中添加对应的切换按钮。
 
 ---
 
@@ -505,11 +559,16 @@ GEMINI_API_BASE_URL=http://你的代理地址:端口
 
 ## 📄 开源许可
 
-本项目采用 [MIT 许可证](LICENSE) 开源。
+本项目采用 [CC BY-NC-SA 4.0 许可证](LICENSE) 开源。
+严禁任何形式的商业行为。
+
+**如果想商用，请联系作者购买商用许可。**
 
 ---
 
 ## 📞 联系
 
 - **Email**: S@gitsay.com
+- **QQ**: 550948321
+- **WeChat**: Goblin_MoMo
 - **GitHub**: [@gbmomo](https://github.com/gbmomo)

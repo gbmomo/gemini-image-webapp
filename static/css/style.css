@@ -195,12 +195,15 @@ body.admin-page {
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     background-clip: text;
+    line-height: 1;
+    transform: translateY(-1px);
 }
 
 .banner-text {
     font-size: 0.9rem;
     color: var(--text-primary);
     font-weight: 500;
+    line-height: 1;
 }
 
 .banner-divider {
@@ -329,6 +332,116 @@ body.admin-page {
     background: rgba(239, 68, 68, 0.3);
 }
 
+/* 语言切换按钮 */
+.lang-switch {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-sm);
+    padding: 2px;
+    border: 1px solid var(--border-color);
+}
+
+/* 移动端隐藏点数、用户名、Logo和站点标题 */
+@media (max-width: 899px) {
+
+    .user-credits,
+    .user-name,
+    .site-logo,
+    .site-title-group {
+        display: none !important;
+    }
+}
+
+.lang-btn {
+    padding: 4px 10px;
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    font-size: 0.85rem;
+    font-weight: 500;
+    cursor: pointer;
+    border-radius: calc(var(--radius-sm) - 2px);
+    transition: all var(--transition-fast);
+}
+
+.lang-btn:hover {
+    color: var(--text-primary);
+    background: var(--bg-hover);
+}
+
+.lang-btn.active {
+    background: var(--accent-gradient);
+    color: white;
+    box-shadow: var(--shadow-glow);
+}
+
+/* 登录页语言切换 */
+.auth-lang-switch {
+    position: absolute;
+    top: 15px;
+    right: 15px;
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-sm);
+    padding: 2px;
+    border: 1px solid var(--border-color);
+    z-index: 10;
+}
+
+/* 充值弹窗中的当前点数显示 */
+.current-credits-display {
+    background: linear-gradient(135deg, rgba(251, 191, 36, 0.15) 0%, rgba(245, 158, 11, 0.15) 100%);
+    border: 1px solid rgba(251, 191, 36, 0.3);
+    border-radius: var(--radius-md);
+    padding: var(--spacing-md) var(--spacing-lg);
+    text-align: center;
+    margin-bottom: var(--spacing-lg);
+}
+
+.current-credits-display span:first-child {
+    color: var(--text-secondary);
+    font-size: 0.95rem;
+}
+
+.current-credits-display .credits-value {
+    color: #fbbf24;
+    font-size: 1.5rem;
+    font-weight: 700;
+    margin-left: var(--spacing-sm);
+}
+
+/* 顶部横幅在英文下的桌面端布局调整 - 只在大屏幕应用 */
+@media (min-width: 1200px) {
+    [lang="en"] .banner-divider {
+        display: none;
+    }
+
+    [lang="en"] .banner-content {
+        gap: 6px;
+    }
+
+    /* 用户菜单在英文模式下的调整 */
+    [lang="en"] .user-menu {
+        gap: 4px;
+    }
+
+    [lang="en"] .btn-recharge,
+    [lang="en"] .btn-admin,
+    [lang="en"] .btn-user-logout,
+    [lang="en"] .user-name {
+        font-size: 0.85rem;
+        padding: 4px 8px;
+    }
+
+    [lang="en"] .user-credits {
+        font-size: 0.85rem;
+    }
+}
+
 /* 主容器 */
 .app-container {
     display: flex;
@@ -336,7 +449,8 @@ body.admin-page {
     flex: 1;
     height: 0;
     /* Important for scrollable children */
-    width: 100vw;
+    width: 100%;
+    overflow-x: hidden;
 }
 
 /* ========================================
@@ -792,6 +906,11 @@ body.admin-page {
     align-items: center;
     gap: 4px;
     white-space: nowrap;
+}
+
+/* 英文版锁定提示 */
+[lang="en"] .settings-locked::after {
+    content: '🔒 Locked (Click button to create new chat)';
 }
 
 /* 分辨率按钮特殊样式 */
@@ -2284,6 +2403,10 @@ body.admin-page {
     /* 默认隐藏，由模板逻辑控制显示 */
     align-items: center;
     justify-content: center;
+    overflow-y: auto;
+    /* 允许垂直滚动 */
+    padding: 20px 0;
+    /* 给上下留出空间 */
 }
 
 .auth-modal-overlay.auth-modal-show {
@@ -2297,10 +2420,16 @@ body.admin-page {
     border: 1px solid var(--border-color);
     border-radius: var(--radius-2xl);
     padding: var(--spacing-xl);
-    width: 100%;
+    width: 90%;
     max-width: 400px;
     animation: borderGlow 4s ease-in-out infinite, slideUp 0.4s ease-out;
     box-shadow: var(--shadow-lg);
+    margin: auto;
+    /* 配合 flex 布局实现居中，且允许滚动 */
+    max-height: 90vh;
+    /* 限制最大高度 */
+    overflow-y: auto;
+    /* 内容过多时内部滚动 */
 }
 
 @keyframes slideUp {
@@ -2547,10 +2676,12 @@ body.admin-page {
 .recharge-input-row {
     display: flex;
     gap: var(--spacing-sm);
+    flex-wrap: wrap;
 }
 
 .recharge-input {
     flex: 1;
+    min-width: 150px;
     padding: 12px 16px;
     background: var(--bg-input);
     border: 1px solid var(--border-color);
@@ -2584,7 +2715,7 @@ body.admin-page {
     font-weight: 600;
     cursor: pointer;
     transition: all var(--transition-fast);
-    white-space: nowrap;
+    flex-shrink: 0;
 }
 
 .btn-redeem:hover {

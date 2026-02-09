@@ -289,13 +289,13 @@ def send_verification_code_route():
     email = data.get("email", "").strip()
     
     if not email:
-        return jsonify({"error": "请输入邮箱地址"}), 400
+        return jsonify({"error": "error_email_required"}), 400
     
     # 验证邮箱格式
     import re
     email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
     if not re.match(email_pattern, email):
-        return jsonify({"error": "邮箱格式不正确"}), 400
+        return jsonify({"error": "error_invalid_email"}), 400
     
     # 生成验证码
     code = generate_verification_code(6)
@@ -630,13 +630,13 @@ def generate_image():
         error_str = str(e)
         
         if "DEADLINE_EXCEEDED" in error_str:
-            return jsonify({"error": "图片生成超时，服务器繁忙，请稍后重试"}), 503
+            return jsonify({"error": "error_timeout", "error_code": "DEADLINE_EXCEEDED"}), 503
         elif "RESOURCE_EXHAUSTED" in error_str:
-            return jsonify({"error": "API 配额已用尽，请稍后重试"}), 503
+            return jsonify({"error": "error_quota_exceeded", "error_code": "RESOURCE_EXHAUSTED"}), 503
         elif "UNAVAILABLE" in error_str:
-            return jsonify({"error": "服务暂时不可用，请稍后重试"}), 503
+            return jsonify({"error": "error_service_unavailable", "error_code": "UNAVAILABLE"}), 503
         else:
-            return jsonify({"error": "服务器繁忙，请稍后重试"}), 503
+            return jsonify({"error": "error_server_busy", "error_code": "SERVER_ERROR"}), 503
     
     except genai_errors.ClientError as e:
         # 客户端错误（无效请求等）
@@ -644,11 +644,11 @@ def generate_image():
         error_str = str(e)
         
         if "INVALID_ARGUMENT" in error_str:
-            return jsonify({"error": "请求参数无效，请检查提示词或图片"}), 400
+            return jsonify({"error": "error_invalid_request", "error_code": "INVALID_ARGUMENT"}), 400
         elif "PERMISSION_DENIED" in error_str:
-            return jsonify({"error": "API 权限被拒绝，请联系管理员"}), 403
+            return jsonify({"error": "error_permission_denied", "error_code": "PERMISSION_DENIED"}), 403
         else:
-            return jsonify({"error": "请求无效，请检查输入内容"}), 400
+            return jsonify({"error": "error_invalid_input", "error_code": "CLIENT_ERROR"}), 400
     
     except Exception as e:
         # 其他未知错误
@@ -658,7 +658,7 @@ def generate_image():
         if os.getenv('FLASK_DEBUG', 'False').lower() == 'true':
             return jsonify({"error": str(e)}), 500
         else:
-            return jsonify({"error": "图片生成失败，请稍后重试"}), 500
+            return jsonify({"error": "error_generation_failed", "error_code": "GENERATION_FAILED"}), 500
 
 
 @app.route("/static/images/<filename>")

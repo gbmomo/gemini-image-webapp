@@ -44,7 +44,7 @@ def send_verification_email(recipient_email, verification_code):
     """
     if not EMAIL_PASSWORD:
         logger.error("邮箱密码未配置")
-        return False, "邮件服务未配置"
+        return False, "error_email_not_configured"
     
     try:
         # 创建邮件对象
@@ -185,14 +185,14 @@ def send_verification_email(recipient_email, verification_code):
             server.send_message(message)
         
         logger.info(f"验证码邮件已发送到 {recipient_email}")
-        return True, "验证码已发送到您的邮箱"
+        return True, "success"
     
     except smtplib.SMTPAuthenticationError:
         logger.error("SMTP 认证失败，请检查邮箱账号和密码")
-        return False, "邮件服务认证失败"
+        return False, "error_email_auth_failed"
     except smtplib.SMTPException as e:
         logger.error(f"发送邮件失败 (SMTP): {str(e)}")
-        return False, "邮件发送失败，请稍后重试"
+        return False, "error_email_send_failed"
     except Exception as e:
         logger.error(f"发送邮件失败: {str(e)}")
-        return False, "邮件发送失败，请稍后重试"
+        return False, "error_email_send_failed"

@@ -114,17 +114,20 @@ async function generateImage(sessionId, prompt, aspectRatio, imageSize, referenc
         } else {
             // 服务器返回了非 JSON（如 HTML 错误页面）
             const text = await response.text();
-            console.error('服务器返回非 JSON:', text.substring(0, 200));
-            throw new Error('服务器错误，请稍后重试或联系管理员');
+            console.error('Server returned non-JSON:', text.substring(0, 200));
+            throw new Error(I18n.t('error_server_error'));
         }
 
         if (!response.ok) {
-            throw new Error(data.error || '生成失败');
+            // 如果错误消息是错误代码（以 error_ 开头），则翻译它
+            const errorMsg = data.error || 'generate_failed';
+            const translatedError = errorMsg.startsWith('error_') ? I18n.t(errorMsg) : errorMsg;
+            throw new Error(translatedError);
         }
 
         return data;
     } catch (error) {
-        console.error('生成图像失败:', error);
+        console.error('Image generation failed:', error);
         throw error;
     }
 }
@@ -134,14 +137,17 @@ async function generateImage(sessionId, prompt, aspectRatio, imageSize, referenc
 // ========================================
 
 function renderSessionList() {
-    elements.sessionList.innerHTML = state.sessions.map(session => `
+    elements.sessionList.innerHTML = state.sessions.map(session => {
+        // 将后端默认的 '新对话' 翻译为当前语言
+        const title = session.title === '新对话' ? I18n.t('new_chat') : session.title;
+        return `
         <div class="session-item ${session.id === state.currentSessionId ? 'active' : ''}" 
              data-id="${session.id}">
-            <div class="session-title">${escapeHtml(session.title)}</div>
-            <div class="session-meta">${session.message_count} 条消息</div>
-            <button class="session-delete" data-id="${session.id}" title="删除">🗑️</button>
+            <div class="session-title">${escapeHtml(title)}</div>
+            <div class="session-meta">${session.message_count} ${I18n.t('messages_count')}</div>
+            <button class="session-delete" data-id="${session.id}" title="${I18n.t('delete')}">🗑️</button>
         </div>
-    `).join('');
+    `}).join('');
 
     // 绑定点击事件
     elements.sessionList.querySelectorAll('.session-item').forEach(item => {
@@ -193,8 +199,8 @@ function renderMessages(messages) {
         // Use thumbnail for preview if available, original for modal view
         if (msg.image) {
             const previewSrc = msg.thumbnail || msg.image;
-            contentHtml += `<img class="chat-image" src="${previewSrc}" alt="生成的图片" data-src="${msg.image}">`;
-            contentHtml += `<div class="chat-image-hint">✨ 点击图片查看高清大图或下载</div>`;
+            contentHtml += `<img class="chat-image" src="${previewSrc}" alt="${I18n.t('generated_image')}" data-src="${msg.image}">`;
+            contentHtml += `<div class="chat-image-hint">${I18n.t('click_to_view')}</div>`;
         }
 
         // Reference Images (User only usually)
@@ -202,23 +208,23 @@ function renderMessages(messages) {
         if (msg.reference_images && msg.reference_images.length > 0) {
             refImagesHtml += '<div class="chat-ref-images">';
             for (const refImg of msg.reference_images) {
-                refImagesHtml += `<img class="chat-ref-image" src="/static/images/${refImg}" alt="参考图">`;
+                refImagesHtml += `<img class="chat-ref-image" src="/static/images/${refImg}" alt="${I18n.t('reference_image')}">`;
             }
             refImagesHtml += '</div>';
         }
         // Compatibility for old single image
         if (msg.reference_image) {
-            refImagesHtml += `<div class="chat-ref-images"><img class="chat-ref-image" src="/static/images/${msg.reference_image}" alt="参考图"></div>`;
+            refImagesHtml += `<div class="chat-ref-images"><img class="chat-ref-image" src="/static/images/${msg.reference_image}" alt="${I18n.t('reference_image')}"></div>`;
         }
 
         return `
-            <div class="chat-message ${roleClass}">
-                <div class="chat-avatar">${avatar}</div>
-                <div class="chat-content-wrapper">
-                    ${refImagesHtml}
-                    ${contentHtml ? `<div class="chat-bubble">${contentHtml}</div>` : ''}
-                </div>
+        <div class="chat-message ${roleClass}">
+            <div class="chat-avatar">${avatar}</div>
+            <div class="chat-content-wrapper">
+                ${refImagesHtml}
+                ${contentHtml ? `<div class="chat-bubble">${contentHtml}</div>` : ''}
             </div>
+        </div>
         `;
     }).join('');
 
@@ -322,7 +328,7 @@ function handleImageUpload(files) {
     for (const file of fileArray) {
         if (!file.type.startsWith('image/')) continue;
         if (state.referenceImages.length >= MAX_IMAGES) {
-            Modal.alert('上传限制', `最多只能上传 ${MAX_IMAGES} 张参考图`, 'warning');
+            Modal.alert(I18n.t('upload_limit', MAX_IMAGES), I18n.t('upload_limit', MAX_IMAGES), 'warning');
             break;
         }
 
@@ -343,7 +349,7 @@ function removeImage(index) {
 function renderPreviewList() {
     elements.previewList.innerHTML = state.referenceImages.map((img, index) => `
         <div class="preview-item">
-            <img src="${img}" alt="参考图 ${index + 1}">
+            <img src="${img}" alt="${I18n.t('reference_image')} ${index + 1}">
             <button class="btn-remove" data-index="${index}">✕</button>
         </div>
     `).join('');
@@ -371,7 +377,7 @@ async function handleGenerate() {
     const prompt = elements.promptInput.value.trim();
 
     if (!prompt) {
-        Modal.alert('提示', '请输入提示词', 'warning');
+        Modal.alert(I18n.t('enter_prompt'), I18n.t('enter_prompt'), 'warning');
         elements.promptInput.focus();
         return;
     }
@@ -441,7 +447,7 @@ async function handleGenerate() {
         clearReferenceImages();
 
     } catch (error) {
-        Modal.alert('生成失败', error.message, 'error');
+        Modal.alert(I18n.t('generate_failed'), error.message, 'error');
     } finally {
         showLoading(false);
     }
@@ -537,13 +543,13 @@ function resetSettingsToDefault() {
 
 async function showSettingsLockedModal() {
     const confirmed = await Modal.confirm(
-        '设置已锁定',
-        '更改分辨率或纵横比会重置对话记忆，AI 将无法记住之前生成的图片。<br><br>如需使用不同设置，请点击确定创建新对话。',
+        I18n.t('settings_locked'),
+        I18n.t('settings_locked_msg'),
         'warning'
     );
 
     if (confirmed) {
-        // 用户点击确定后创建新对话
+        // User clicked OK, create new chat
         await handleNewChat();
     }
 }
@@ -679,6 +685,19 @@ async function init() {
     if (state.sessions.length > 0) {
         await selectSession(state.sessions[0].id);
     }
+
+    // 监听语言切换，重新渲染会话列表和消息
+    I18n.onLangChange(() => {
+        renderSessionList();
+        // 如果有当前会话，重新渲染消息以更新图片alt等文本
+        if (state.currentSessionId) {
+            getSession(state.currentSessionId).then(session => {
+                if (session) {
+                    renderMessages(session.messages);
+                }
+            });
+        }
+    });
 }
 
 // 启动应用

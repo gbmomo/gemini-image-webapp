@@ -4,10 +4,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>码言旗下Nano Banana Pro AI图片生成器</title>
+    <title data-i18n="page_title">码言旗下Nano Banana Pro AI图片生成器</title>
     <link rel="icon" href="/static/logo.ico" type="image/x-icon">
     <link rel="stylesheet" href="/static/css/style.css">
     <link href="/static/fonts/inter.css" rel="stylesheet">
+    <script src="/static/js/i18n.js"></script>
 </head>
 
 <body>
@@ -23,31 +24,37 @@
         <div class="site-header">
             <img src="/static/logo.ico" alt="Logo" class="site-logo">
             <div class="site-title-group">
-                <span class="site-title">码言nano</span>
-                <span class="site-subtitle">在线使用Nano Banana Pro</span>
+                <span class="site-title" data-i18n="site_title">码言nano</span>
+                <span class="site-subtitle" data-i18n="site_subtitle">在线使用Nano Banana Pro</span>
             </div>
         </div>
         <!-- 中间内容 -->
         <div class="banner-content">
-            <span class="banner-text">码言旗下</span>
-            <span class="banner-highlight">🍌 Nano Banana Pro</span>
-            <span class="banner-text">4K AI图片生成器</span>
+            <span class="banner-text" data-i18n="banner_brand">码言旗下</span>
+            <span class="banner-highlight" data-i18n="banner_product">🍌 Nano Banana Pro</span>
+            <span class="banner-text" data-i18n="banner_desc">4K AI图片生成器</span>
             <span class="banner-divider">|</span>
-            <span class="banner-price">$0.04起/张</span>
+            <span class="banner-price" data-i18n="banner_price">$0.04起/张</span>
             <span class="banner-divider">|</span>
-            <span class="banner-tag trial">免费试用</span>
+            <span class="banner-tag trial" data-i18n="banner_trial">免费试用</span>
         </div>
         <!-- 右侧用户信息 -->
         <div class="user-menu">
+            <!-- 语言切换 -->
+            <div class="lang-switch">
+                <button class="lang-btn" data-lang="zh">中</button>
+                <button class="lang-btn" data-lang="en">EN</button>
+            </div>
             {% if user %}
-            <span class="user-credits" id="userCredits" title="剩余点数">🪙 {{ user.credits }} 点</span>
-            <button class="btn-recharge" id="btnRecharge" title="充值点数">💳 充值</button>
+            <span class="user-credits" id="userCredits" data-i18n-title="credits_label">🪙 {{ user.credits }} <span
+                    data-i18n="credits_label">点</span></span>
+            <button class="btn-recharge" id="btnRecharge" data-i18n="recharge_btn">💳 充值</button>
             {% endif %}
             <span class="user-name">👤 {{ session.username }}</span>
             {% if session.is_admin %}
-            <a href="/admin" class="btn-admin">管理后台</a>
+            <a href="/admin" class="btn-admin" data-i18n="admin_panel">管理后台</a>
             {% endif %}
-            <a href="/api/logout" class="btn-user-logout">退出</a>
+            <a href="/api/logout" class="btn-user-logout" data-i18n="logout">退出</a>
         </div>
     </header>
 
@@ -62,15 +69,16 @@
                     <h1 class="logo">
                         <span class="logo-icon">🍌</span>
                         <span class="logo-text">
-                            <span class="logo-brand">码言旗下</span>
+                            <span class="logo-brand" data-i18n="sidebar_brand">码言旗下</span>
                             <span class="logo-name">Nano Banana Pro</span>
                         </span>
                     </h1>
-                    <button class="sidebar-close-btn" id="sidebarCloseBtn" aria-label="关闭菜单">✕</button>
+                    <button class="sidebar-close-btn" id="sidebarCloseBtn" aria-label="关闭菜单"
+                        data-i18n-title="close_menu">✕</button>
                 </div>
                 <button class="btn-new-chat" id="btnNewChat">
                     <span class="icon">+</span>
-                    新对话
+                    <span data-i18n="new_chat">新对话</span>
                 </button>
             </div>
             <div class="session-list" id="sessionList">
@@ -86,33 +94,33 @@
                 <div class="control-section">
                     <div class="section-header">
                         <span class="section-icon">🖼️</span>
-                        <span>参考图（可选）</span>
-                        <span class="section-hint">最多14张</span>
+                        <span data-i18n="reference_images">参考图（可选）</span>
+                        <span class="section-hint" data-i18n="max_images_hint">最多14张</span>
                     </div>
                     <div class="upload-container">
                         <div class="upload-area" id="uploadArea">
                             <input type="file" id="referenceImage" accept="image/*" multiple hidden>
                             <div class="upload-placeholder" id="uploadPlaceholder">
                                 <div class="upload-icon">📤</div>
-                                <div class="upload-text">上传</div>
-                                <div class="upload-hint">点击或拖拽</div>
+                                <div class="upload-text" data-i18n="upload">上传</div>
+                                <div class="upload-hint" data-i18n="upload_hint">点击或拖拽</div>
                             </div>
                         </div>
                         <div class="preview-list" id="previewList">
                             <!-- 预览图片会动态添加 -->
                         </div>
                     </div>
-                    <p class="hint-text">可选：上传参考图进行图生图。支持拖拽或粘贴截图，最多14张</p>
+                    <p class="hint-text" data-i18n="upload_desc">可选：上传参考图进行图生图。支持拖拽或粘贴截图，最多14张</p>
                 </div>
 
                 <!-- 提示词输入 -->
                 <div class="control-section">
                     <div class="section-header">
                         <span class="section-icon">✏️</span>
-                        <span>提示词</span>
+                        <span data-i18n="prompt_label">提示词</span>
                     </div>
-                    <textarea id="promptInput" class="prompt-input" placeholder="例如：一只可爱的小猫咪坐在花园里，油画风格，高清，细节丰富"
-                        rows="4"></textarea>
+                    <textarea id="promptInput" class="prompt-input" data-i18n-placeholder="prompt_placeholder"
+                        placeholder="例如：一只可爱的小猫咪坐在花园里，油画风格，高清，细节丰富" rows="4"></textarea>
                 </div>
 
 
@@ -121,12 +129,12 @@
                 <div class="control-section">
                     <div class="section-header">
                         <span class="section-icon">⚙️</span>
-                        <span>纵横比 & 分辨率</span>
+                        <span data-i18n="aspect_resolution">纵横比 & 分辨率</span>
                     </div>
 
                     <!-- 分辨率 -->
                     <div class="option-group" id="resolutionGroup">
-                        <label class="option-label">分辨率(不同分辨率消耗金币数目不同)</label>
+                        <label class="option-label" data-i18n="resolution_label">分辨率(不同分辨率消耗金币数目不同)</label>
                         <div class="option-buttons" id="resolutionButtons">
                             <button class="option-btn resolution-btn active" data-value="1K">
                                 <span class="res-label">1K</span>
@@ -145,27 +153,29 @@
 
                     <!-- 宽高比 -->
                     <div class="option-group">
-                        <label class="option-label">纵横比</label>
+                        <label class="option-label" data-i18n="aspect_ratio_label">纵横比</label>
                         <div class="option-buttons aspect-ratio-buttons" id="aspectRatioButtons">
-                            <button class="option-btn active" data-value="auto">auto 自适应</button>
-                            <button class="option-btn" data-value="1:1">1:1 方形</button>
-                            <button class="option-btn" data-value="16:9">16:9 横版</button>
-                            <button class="option-btn" data-value="9:16">9:16 竖版</button>
-                            <button class="option-btn" data-value="4:3">4:3 横版</button>
-                            <button class="option-btn" data-value="3:4">3:4 竖版</button>
-                            <button class="option-btn" data-value="21:9">21:9 超宽</button>
-                            <button class="option-btn" data-value="3:2">3:2 横版</button>
-                            <button class="option-btn" data-value="2:3">2:3 竖版</button>
+                            <button class="option-btn active" data-value="auto" data-i18n="aspect_auto">auto
+                                自适应</button>
+                            <button class="option-btn" data-value="1:1" data-i18n="aspect_square">1:1 方形</button>
+                            <button class="option-btn" data-value="16:9" data-i18n="aspect_16_9">16:9 横版</button>
+                            <button class="option-btn" data-value="9:16" data-i18n="aspect_9_16">9:16 竖版</button>
+                            <button class="option-btn" data-value="4:3" data-i18n="aspect_4_3">4:3 横版</button>
+                            <button class="option-btn" data-value="3:4" data-i18n="aspect_3_4">3:4 竖版</button>
+                            <button class="option-btn" data-value="21:9" data-i18n="aspect_21_9">21:9 超宽</button>
+                            <button class="option-btn" data-value="3:2" data-i18n="aspect_3_2">3:2 横版</button>
+                            <button class="option-btn" data-value="2:3" data-i18n="aspect_2_3">2:3 竖版</button>
                         </div>
                     </div>
-                    <p class="hint-text warning-hint">⚠️ 更改分辨率或纵横比会重置对话记忆，AI 将无法记住之前生成的图片</p>
+                    <p class="hint-text warning-hint" data-i18n="settings_warning">⚠️ 更改分辨率或纵横比会重置对话记忆，AI 将无法记住之前生成的图片
+                    </p>
                 </div>
 
                 <!-- 生成按钮 -->
                 <div class="generate-section">
                     <button class="btn-generate" id="btnGenerate">
                         <span class="generate-icon">✨</span>
-                        <span>生成图片</span>
+                        <span data-i18n="generate_btn">生成图片</span>
                     </button>
                 </div>
             </div>
@@ -176,15 +186,15 @@
                     <div class="preview-tabs">
                         <button class="preview-tab active">
                             <span class="tab-icon">🖼️</span>
-                            聊天区
+                            <span data-i18n="chat_area">聊天区</span>
                         </button>
                     </div>
                 </div>
                 <div class="preview-content" id="previewContent">
                     <div class="empty-state" id="emptyState">
                         <div class="empty-icon">🖼️</div>
-                        <p class="empty-text">对话内容与生成的图片将在这里显示</p>
-                        <p class="empty-hint">在左侧输入提示词，点击生成按钮开始创作</p>
+                        <p class="empty-text" data-i18n="empty_state_title">对话内容与生成的图片将在这里显示</p>
+                        <p class="empty-hint" data-i18n="empty_state_hint">在左侧输入提示词，点击生成按钮开始创作</p>
                     </div>
                     <div class="message-list" id="messageList" hidden>
                         <!-- 消息会动态添加 -->
@@ -197,17 +207,17 @@
     <!-- 加载遮罩 -->
     <div class="loading-overlay" id="loadingOverlay" hidden>
         <div class="loading-spinner"></div>
-        <p class="loading-text">正在生成图片...</p>
-        <p class="loading-hint">预计耗时 1 min</p>
+        <p class="loading-text" data-i18n="loading_text">正在生成图片...</p>
+        <p class="loading-hint" data-i18n="loading_hint">预计耗时 1 min</p>
     </div>
 
     <!-- 图片预览模态框 -->
     <div class="image-modal" id="imageModal" hidden>
         <div class="modal-backdrop" id="modalBackdrop"></div>
         <div class="modal-content">
-            <img id="modalImage" src="" alt="大图预览">
+            <img id="modalImage" src="" alt="" data-i18n-title="image_preview">
             <div class="modal-actions">
-                <a class="btn-download" id="btnDownload" download>
+                <a class="btn-download" id="btnDownload" download data-i18n-html="download_image">
                     <span>📥</span> 下载图片
                 </a>
                 <button class="btn-close-modal" id="btnCloseModal">✕</button>
@@ -221,34 +231,40 @@
             <div class="custom-modal-header">
                 <h3 class="custom-modal-title">
                     <span class="custom-modal-icon">💳</span>
-                    点数充值
+                    <span data-i18n="recharge_title">点数充值</span>
                 </h3>
                 <button class="custom-modal-close-btn" id="closeRechargeModal">&times;</button>
             </div>
             <div class="custom-modal-body">
+                <!-- 当前点数显示 -->
+                <div class="current-credits-display">
+                    <span data-i18n="current_credits">当前点数：</span>
+                    <span class="credits-value" id="rechargeModalCredits">{% if user %}{{ user.credits }}{% else %}0{%
+                        endif %}</span>
+                </div>
                 <div class="recharge-section">
                     <div class="recharge-option">
                         <div class="recharge-option-icon">🛒</div>
                         <div class="recharge-option-info">
-                            <h4>购买卡密</h4>
-                            <p>在商城购买点数卡密，获取充值码</p>
+                            <h4 data-i18n="buy_card">购买卡密</h4>
+                            <p data-i18n="buy_card_desc">在商城购买点数卡密，获取充值码</p>
                         </div>
                         <button class="btn-buy-card"
-                            onclick="window.open('https://pay.ldxp.cn/shop/momo/fhrvq4', '_blank')">
+                            onclick="window.open('https://pay.ldxp.cn/shop/momo/fhrvq4', '_blank')" data-i18n="go_buy">
                             去购买 →
                         </button>
                     </div>
                 </div>
                 <div class="recharge-divider">
-                    <span>或</span>
+                    <span data-i18n="or">或</span>
                 </div>
                 <div class="recharge-section">
                     <div class="recharge-input-group">
-                        <label>输入卡密充值</label>
+                        <label data-i18n="enter_card_key">输入卡密充值</label>
                         <div class="recharge-input-row">
-                            <input type="text" id="cardKeyInput" class="recharge-input" placeholder="请输入16位卡密码"
-                                maxlength="20">
-                            <button class="btn-redeem" id="btnRedeem">确认充值</button>
+                            <input type="text" id="cardKeyInput" class="recharge-input"
+                                data-i18n-placeholder="card_key_placeholder" placeholder="请输入16位卡密码" maxlength="20">
+                            <button class="btn-redeem" id="btnRedeem" data-i18n="confirm_recharge">确认充值</button>
                         </div>
                     </div>
                 </div>
@@ -259,27 +275,35 @@
     <!-- 登录/注册模态框 -->
     <div class="auth-modal-overlay {% if not session.user_id %}auth-modal-show{% endif %}" id="authModalOverlay">
         <div class="auth-modal-content">
+            <!-- 语言切换 -->
+            <div class="auth-lang-switch">
+                <button class="lang-btn" data-lang="zh">中</button>
+                <button class="lang-btn" data-lang="en">EN</button>
+            </div>
             <!-- 登录表单 -->
             <div id="loginSection">
                 <div class="auth-header">
                     <img src="/static/logo.ico" alt="Logo" class="auth-logo">
-                    <h2 class="auth-title">欢迎回来</h2>
-                    <p class="auth-subtitle">登录码言 Nano Banana Pro 创作</p>
+                    <h2 class="auth-title" data-i18n="welcome_back">欢迎回来</h2>
+                    <p class="auth-subtitle" data-i18n="login_subtitle">登录码言 Nano Banana Pro 创作</p>
                 </div>
                 <form class="auth-form" id="loginForm">
                     <div class="form-group">
-                        <label>用户名</label>
-                        <input type="text" id="loginUsername" required placeholder="请输入用户名">
+                        <label data-i18n="username">用户名</label>
+                        <input type="text" id="loginUsername" required data-i18n-placeholder="username_placeholder"
+                            placeholder="请输入用户名">
                     </div>
                     <div class="form-group">
-                        <label>密码</label>
-                        <input type="password" id="loginPassword" required placeholder="请输入密码">
+                        <label data-i18n="password">密码</label>
+                        <input type="password" id="loginPassword" required data-i18n-placeholder="password_placeholder"
+                            placeholder="请输入密码">
                     </div>
                     <div class="form-error" id="loginError"></div>
-                    <button type="submit" class="btn-auth btn-full">登 录</button>
+                    <button type="submit" class="btn-auth btn-full" data-i18n="login_btn">登 录</button>
                 </form>
                 <div class="auth-footer">
-                    <p>还没有账号？<a href="#" onclick="switchAuthMode('register')">立即注册</a></p>
+                    <p><span data-i18n="no_account">还没有账号？</span><a href="#" onclick="switchAuthMode('register')"
+                            data-i18n="register_now">立即注册</a></p>
                 </div>
             </div>
 
@@ -287,41 +311,48 @@
             <div id="registerSection" style="display: none;">
                 <div class="auth-header">
                     <img src="/static/logo.ico" alt="Logo" class="auth-logo">
-                    <h2 class="auth-title">创建账号</h2>
-                    <p class="auth-subtitle">加入码言 Nano Banana Pro 开启 AI 之旅</p>
+                    <h2 class="auth-title" data-i18n="create_account">创建账号</h2>
+                    <p class="auth-subtitle" data-i18n="register_subtitle">加入码言 Nano Banana Pro 开启 AI 之旅</p>
                 </div>
                 <form class="auth-form" id="registerForm">
                     <div class="form-group">
-                        <label>用户名</label>
-                        <input type="text" id="regUsername" required placeholder="至少3个字符" minlength="3">
+                        <label data-i18n="username">用户名</label>
+                        <input type="text" id="regUsername" required data-i18n-placeholder="username_hint"
+                            placeholder="至少3个字符" minlength="3">
                     </div>
                     <div class="form-group">
-                        <label>邮箱</label>
-                        <input type="email" id="regEmail" required placeholder="请输入邮箱地址">
+                        <label data-i18n="email">邮箱</label>
+                        <input type="email" id="regEmail" required data-i18n-placeholder="email_placeholder"
+                            placeholder="请输入邮箱地址">
                     </div>
                     <div class="form-group">
-                        <label>验证码</label>
+                        <label data-i18n="verification_code">验证码</label>
                         <div style="display: flex; gap: 10px;">
-                            <input type="text" id="regVerificationCode" required placeholder="请输入邮箱验证码" maxlength="6"
+                            <input type="text" id="regVerificationCode" required
+                                data-i18n-placeholder="code_placeholder" placeholder="请输入邮箱验证码" maxlength="6"
                                 style="flex: 1;">
-                            <button type="button" class="btn-send-code" id="btnSendCode">发送验证码</button>
+                            <button type="button" class="btn-send-code" id="btnSendCode"
+                                data-i18n="send_code">发送验证码</button>
                         </div>
                         <small id="codeHint"
                             style="color: #666; font-size: 12px; display: none; margin-top: 5px;"></small>
                     </div>
                     <div class="form-group">
-                        <label>密码</label>
-                        <input type="password" id="regPassword" required placeholder="至少6个字符" minlength="6">
+                        <label data-i18n="password">密码</label>
+                        <input type="password" id="regPassword" required data-i18n-placeholder="password_hint"
+                            placeholder="至少6个字符" minlength="6">
                     </div>
                     <div class="form-group">
-                        <label>确认密码</label>
-                        <input type="password" id="regConfirmPassword" required placeholder="请再次输入密码">
+                        <label data-i18n="confirm_password">确认密码</label>
+                        <input type="password" id="regConfirmPassword" required
+                            data-i18n-placeholder="confirm_password_placeholder" placeholder="请再次输入密码">
                     </div>
                     <div class="form-error" id="registerError"></div>
-                    <button type="submit" class="btn-auth btn-full">注 册</button>
+                    <button type="submit" class="btn-auth btn-full" data-i18n="register_btn">注 册</button>
                 </form>
                 <div class="auth-footer">
-                    <p>已有账号？<a href="#" onclick="switchAuthMode('login')">返回登录</a></p>
+                    <p><span data-i18n="has_account">已有账号？</span><a href="#" onclick="switchAuthMode('login')"
+                            data-i18n="back_to_login">返回登录</a></p>
                 </div>
             </div>
         </div>
@@ -357,7 +388,7 @@
             const password = document.getElementById('loginPassword').value;
             const errorDiv = document.getElementById('loginError');
 
-            errorDiv.textContent = '登录中...';
+            errorDiv.textContent = I18n.t('logging_in');
 
             try {
                 const response = await fetch('/api/login', {
@@ -371,13 +402,13 @@
                 if (response.ok) {
                     location.reload();
                 } else {
-                    errorDiv.textContent = data.error || '登录失败';
-                    // 使用 Toast 提示错误
-                    Modal.toast(data.error || '登录失败', 'error');
+                    const translatedError = I18n.translateError(data.error, 'login_failed');
+                    errorDiv.textContent = translatedError;
+                    Modal.toast(translatedError, 'error');
                 }
             } catch (error) {
-                errorDiv.textContent = '网络错误，请稍后重试';
-                Modal.toast('网络错误，请稍后重试', 'error');
+                errorDiv.textContent = I18n.t('network_error');
+                Modal.toast(I18n.t('network_error'), 'error');
             }
         });
 
@@ -392,7 +423,7 @@
             const email = regEmail.value.trim();
 
             if (!email) {
-                Modal.toast('请先输入邮箱地址', 'warning');
+                Modal.toast(I18n.t('enter_email_first'), 'warning');
                 regEmail.focus();
                 return;
             }
@@ -400,13 +431,13 @@
             // 简单的邮箱格式验证
             const emailPattern = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
             if (!emailPattern.test(email)) {
-                Modal.toast('邮箱格式不正确', 'warning');
+                Modal.toast(I18n.t('invalid_email'), 'warning');
                 regEmail.focus();
                 return;
             }
 
             btnSendCode.disabled = true;
-            btnSendCode.textContent = '发送中...';
+            btnSendCode.textContent = I18n.t('logging_in').replace('登录', I18n.t('send_code').split(' ')[0]);
 
             try {
                 const response = await fetch('/api/send-verification-code', {
@@ -418,34 +449,36 @@
                 const data = await response.json();
 
                 if (response.ok) {
-                    Modal.toast('验证码已发送到您的邮箱', 'success');
-                    codeHint.textContent = '验证码已发送，有效期10分钟';
+                    Modal.toast(I18n.t('code_sent'), 'success');
+                    codeHint.textContent = I18n.t('code_sent_hint');
                     codeHint.style.display = 'block';
                     codeHint.style.color = '#28a745';
 
                     // 开始60秒倒计时
                     let countdown = 60;
-                    btnSendCode.textContent = `${countdown}秒后重试`;
+                    btnSendCode.textContent = `${countdown}${I18n.t('seconds_retry')}`;
 
                     countdownTimer = setInterval(() => {
                         countdown--;
                         if (countdown > 0) {
-                            btnSendCode.textContent = `${countdown}秒后重试`;
+                            btnSendCode.textContent = `${countdown}${I18n.t('seconds_retry')}`;
                         } else {
                             clearInterval(countdownTimer);
                             btnSendCode.disabled = false;
-                            btnSendCode.textContent = '发送验证码';
+                            btnSendCode.textContent = I18n.t('send_code');
                         }
                     }, 1000);
                 } else {
-                    Modal.toast(data.error || '发送失败', 'error');
+                    // 翻译后端错误消息
+                    const translatedError = I18n.translateError(data.error, 'send_failed');
+                    Modal.toast(translatedError, 'error');
                     btnSendCode.disabled = false;
-                    btnSendCode.textContent = '发送验证码';
+                    btnSendCode.textContent = I18n.t('send_code');
                 }
             } catch (error) {
-                Modal.toast('网络错误，请稍后重试', 'error');
+                Modal.toast(I18n.t('network_error'), 'error');
                 btnSendCode.disabled = false;
-                btnSendCode.textContent = '发送验证码';
+                btnSendCode.textContent = I18n.t('send_code');
             }
         });
 
@@ -459,18 +492,18 @@
             const errorDiv = document.getElementById('registerError');
 
             if (password !== confirmPassword) {
-                errorDiv.textContent = '两次输入的密码不一致';
-                Modal.toast('两次输入的密码不一致', 'warning');
+                errorDiv.textContent = I18n.t('passwords_not_match');
+                Modal.toast(I18n.t('passwords_not_match'), 'warning');
                 return;
             }
 
             if (!verificationCode) {
-                errorDiv.textContent = '请输入邮箱验证码';
-                Modal.toast('请输入邮箱验证码', 'warning');
+                errorDiv.textContent = I18n.t('enter_code');
+                Modal.toast(I18n.t('enter_code'), 'warning');
                 return;
             }
 
-            errorDiv.textContent = '注册中...';
+            errorDiv.textContent = I18n.t('registering');
 
             try {
                 const response = await fetch('/api/register', {
@@ -482,18 +515,18 @@
                 const data = await response.json();
 
                 if (response.ok) {
-                    // 使用自定义 Modal 提示成功
-                    await Modal.alert('注册成功', '您的账号已创建成功，请登录。', 'success');
+                    await Modal.alert(I18n.t('register_success'), I18n.t('register_success_msg'), 'success');
                     switchAuthMode('login');
                     document.getElementById('loginUsername').value = username;
                     document.getElementById('loginPassword').focus();
                 } else {
-                    errorDiv.textContent = data.error || '注册失败';
-                    Modal.toast(data.error || '注册失败', 'error');
+                    const translatedError = I18n.translateError(data.error, 'register_failed');
+                    errorDiv.textContent = translatedError;
+                    Modal.toast(translatedError, 'error');
                 }
             } catch (error) {
-                errorDiv.textContent = '网络错误，请稍后重试';
-                Modal.toast('网络错误，请稍后重试', 'error');
+                errorDiv.textContent = I18n.t('network_error');
+                Modal.toast(I18n.t('network_error'), 'error');
             }
         });
 
@@ -545,13 +578,13 @@
                 const code = cardKeyInput.value.trim();
 
                 if (!code) {
-                    Modal.toast('请输入卡密', 'warning');
+                    Modal.toast(I18n.t('enter_card_key_msg'), 'warning');
                     cardKeyInput.focus();
                     return;
                 }
 
                 btnRedeem.disabled = true;
-                btnRedeem.textContent = '充值中...';
+                btnRedeem.textContent = I18n.t('recharging');
 
                 try {
                     const response = await fetch('/api/redeem', {
@@ -563,23 +596,25 @@
                     const data = await response.json();
 
                     if (response.ok) {
-                        Modal.toast(data.message, 'success');
+                        // 使用翻译后的成功消息，格式：充值成功！用户现有 X 点
+                        const successMsg = I18n.t('recharge_success_msg').replace('{0}', data.new_credits);
+                        Modal.toast(successMsg, 'success');
                         // 更新点数显示
                         const creditEl = document.getElementById('userCredits');
                         if (creditEl) {
-                            creditEl.textContent = `🪙 ${data.new_credits} 点`;
+                            creditEl.innerHTML = `🪙 ${data.new_credits} <span data-i18n="credits_label">${I18n.t('credits_label')}</span>`;
                         }
                         // 关闭弹窗并清空输入
                         cardKeyInput.value = '';
                         closeRechargeModalFunc();
                     } else {
-                        Modal.toast(data.error || '充值失败', 'error');
+                        Modal.toast(I18n.translateError(data.error, 'recharge_failed'), 'error');
                     }
                 } catch (error) {
-                    Modal.toast('网络错误，请稍后重试', 'error');
+                    Modal.toast(I18n.t('network_error'), 'error');
                 } finally {
                     btnRedeem.disabled = false;
-                    btnRedeem.textContent = '确认充值';
+                    btnRedeem.textContent = I18n.t('confirm_recharge');
                 }
             });
         }

@@ -31,7 +31,9 @@ class CustomModal {
 
         let icon = '';
         let btnClass = 'custom-modal-btn-confirm';
-        let btnText = '确定';
+        // Use I18n if available, fallback to Chinese
+        let btnText = typeof I18n !== 'undefined' && I18n.t ? I18n.t('btn_ok') : '确定';
+        let cancelText = typeof I18n !== 'undefined' && I18n.t ? I18n.t('btn_cancel') : '取消';
 
         if (type === 'success') {
             icon = '✅';
@@ -40,7 +42,7 @@ class CustomModal {
             btnClass = 'custom-modal-btn-danger';
         } else if (type === 'warning') {
             icon = '⚠️';
-            btnClass = 'custom-modal-btn-danger'; // Usually warning implies careful action
+            btnClass = 'custom-modal-btn-danger';
         } else {
             icon = 'ℹ️';
         }
@@ -61,7 +63,7 @@ class CustomModal {
                     ${isPrompt ? `<input type="text" class="custom-modal-input" value="${inputValue === 'undefined' ? '' : inputValue}" autofocus>` : ''}
                 </div>
                 <div class="custom-modal-footer">
-                    ${showCancel ? `<button class="custom-modal-btn custom-modal-btn-cancel">取消</button>` : ''}
+                    ${showCancel ? `<button class="custom-modal-btn custom-modal-btn-cancel">${cancelText}</button>` : ''}
                     <button class="custom-modal-btn ${btnClass} btn-ok">${btnText}</button>
                 </div>
             </div>
