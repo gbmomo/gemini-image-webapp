@@ -192,8 +192,25 @@ def load_sessions(user_id):
     """加载指定用户的会话数据"""
     sessions_file = get_user_sessions_file(user_id)
     if os.path.exists(sessions_file):
-        with open(sessions_file, "r", encoding="utf-8") as f:
-            return json.load(f)
+        try:
+            with open(sessions_file, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except (json.JSONDecodeError, ValueError) as e:
+            # JSON 文件损坏，备份并返回空数据
+            logger.error(f"会话文件损坏 (user {user_id}): {e}")
+            backup_file = f"{sessions_file}.corrupt.{int(time.time())}"
+            try:
+                import shutil
+                shutil.copy2(sessions_file, backup_file)
+                logger.info(f"已备份损坏的会话文件到: {backup_file}")
+            except Exception as backup_error:
+                logger.error(f"备份失败: {backup_error}")
+            # 删除损坏的文件，让系统重新开始
+            try:
+                os.remove(sessions_file)
+            except Exception as remove_error:
+                logger.error(f"删除损坏文件失败: {remove_error}")
+            return {}
     return {}
 
 
@@ -299,9 +316,21 @@ def rebuild_chat_history(user_id, session_id):
                             image_data = f.read()
                         ext = os.path.splitext(image_path)[1].lower()
                         mime_type = mime_map.get(ext, 'image/png')
-                        parts.append(types.Part.from_bytes(
+                        
+                        # 创建图片部分
+                        image_part = types.Part.from_bytes(
                             data=image_data, mime_type=mime_type
-                        ))
+                        )
+                        
+                        # 如果保存了 thought_signature，则附加到图片部分
+                        if msg.get("thought_signature"):
+                            # 从 base64 字符串解码回 bytes
+                            signature = msg["thought_signature"]
+                            if isinstance(signature, str):
+                                signature = base64.b64decode(signature)
+                            image_part.thought_signature = signature
+                        
+                        parts.append(image_part)
                     except Exception as e:
                         logger.warning(f"重建历史时加载生成图片失败 {msg['image']}: {e}")
             
@@ -680,6 +709,7 @@ def generate_image():
             return jsonify({"error": "AI 未返回有效响应，请重试"}), 500
 
         result_thumbnail = None
+        image_thought_signature = None  # 保存图片的 thought_signature
         for part in response.parts:
             if part.text is not None:
                 result_text += part.text
@@ -691,6 +721,14 @@ def generate_image():
                 image = part.as_image()
                 image.save(image_path)
                 result_image = f"/static/images/{image_filename}"
+                
+                # 提取 thought_signature（如果存在）
+                if hasattr(part, 'thought_signature') and part.thought_signature:
+                    # 转换为 base64 字符串以便 JSON 序列化
+                    if isinstance(part.thought_signature, bytes):
+                        image_thought_signature = base64.b64encode(part.thought_signature).decode('utf-8')
+                    else:
+                        image_thought_signature = part.thought_signature
                 
                 # 创建缩略图用于预览
                 thumbnail_filename = f"thumb_{image_filename.replace('.png', '.jpg')}"
@@ -713,6 +751,7 @@ def generate_image():
             "content": result_text,
             "image": result_image,
             "thumbnail": result_thumbnail if result_image else None,
+            "thought_signature": image_thought_signature,  # 保存 thought_signature
             "timestamp": now
         })
 
