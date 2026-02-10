@@ -251,7 +251,7 @@ def rebuild_chat_history(user_id, session_id):
             
             # 添加文本
             if msg.get("content"):
-                parts.append(msg["content"])
+                parts.append(types.Part(text=msg["content"]))
             
             if parts:
                 history.append(types.Content(role="user", parts=parts))
@@ -259,7 +259,7 @@ def rebuild_chat_history(user_id, session_id):
         elif role == "assistant":
             # 添加文本
             if msg.get("content"):
-                parts.append(msg["content"])
+                parts.append(types.Part(text=msg["content"]))
             
             # 添加生成的图片
             if msg.get("image"):
