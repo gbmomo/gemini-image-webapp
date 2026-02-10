@@ -24,6 +24,7 @@ from flask_wtf.csrf import CSRFProtect
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from flask_talisman import Talisman
+from flask_compress import Compress
 
 # 配置日志
 logging.basicConfig(level=logging.INFO)
@@ -60,6 +61,20 @@ limiter = Limiter(
     default_limits=["1000 per day", "100 per hour"],
     storage_uri="memory://"
 )
+
+# Gzip 压缩配置（优化网络传输）
+compress = Compress()
+compress.init_app(app)
+app.config['COMPRESS_MIMETYPES'] = [
+    'text/html',
+    'text/css',
+    'text/xml',
+    'application/json',
+    'application/javascript',
+    'text/javascript',
+]
+app.config['COMPRESS_LEVEL'] = 6  # 压缩级别 1-9，6是平衡速度和压缩率
+app.config['COMPRESS_MIN_SIZE'] = 500  # 只压缩大于500字节的响应
 
 # 速率限制错误返回 JSON 格式
 @app.errorhandler(429)
@@ -400,6 +415,20 @@ def index():
     if "user_id" in session:
         user = get_user_by_id(session["user_id"])
     return render_template("index.html", user=user)
+
+
+@app.route("/login")
+def login():
+    """登录页（重定向到主页，主页自带登录功能）"""
+    return redirect(url_for("index"))
+
+
+@app.route("/admin")
+@admin_required
+def admin():
+    """管理员控制台页面"""
+    user = get_user_by_id(session["user_id"])
+    return render_template("admin.html", user=user)
 
 
 @app.route("/api/login", methods=["POST"])

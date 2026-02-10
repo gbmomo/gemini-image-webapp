@@ -7,3 +7,4 @@ Pillow>=10.0.0
 flask-wtf>=1.2.0
 flask-limiter>=3.5.0
 flask-talisman>=1.1.0
+Flask-Compress>=1.1.0

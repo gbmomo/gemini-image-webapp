@@ -41,6 +41,7 @@ const elements = {
 
     // 加载和模态框
     loadingOverlay: document.getElementById('loadingOverlay'),
+    sessionLoadingBar: document.getElementById('sessionLoadingBar'),
     imageModal: document.getElementById('imageModal'),
     modalBackdrop: document.getElementById('modalBackdrop'),
     modalImage: document.getElementById('modalImage'),
@@ -199,7 +200,7 @@ function renderMessages(messages) {
         // Use thumbnail for preview if available, original for modal view
         if (msg.image) {
             const previewSrc = msg.thumbnail || msg.image;
-            contentHtml += `<img class="chat-image" src="${previewSrc}" alt="${I18n.t('generated_image')}" data-src="${msg.image}">`;
+            contentHtml += `<img class="chat-image" src="${previewSrc}" alt="${I18n.t('generated_image')}" data-src="${msg.image}" loading="lazy">`;
             contentHtml += `<div class="chat-image-hint">${I18n.t('click_to_view')}</div>`;
         }
 
@@ -208,13 +209,13 @@ function renderMessages(messages) {
         if (msg.reference_images && msg.reference_images.length > 0) {
             refImagesHtml += '<div class="chat-ref-images">';
             for (const refImg of msg.reference_images) {
-                refImagesHtml += `<img class="chat-ref-image" src="/static/images/${refImg}" alt="${I18n.t('reference_image')}">`;
+                refImagesHtml += `<img class="chat-ref-image" src="/static/images/${refImg}" alt="${I18n.t('reference_image')}" loading="lazy">`;
             }
             refImagesHtml += '</div>';
         }
         // Compatibility for old single image
         if (msg.reference_image) {
-            refImagesHtml += `<div class="chat-ref-images"><img class="chat-ref-image" src="/static/images/${msg.reference_image}" alt="${I18n.t('reference_image')}"></div>`;
+            refImagesHtml += `<div class="chat-ref-images"><img class="chat-ref-image" src="/static/images/${msg.reference_image}" alt="${I18n.t('reference_image')}" loading="lazy"></div>`;
         }
 
         return `
@@ -261,6 +262,28 @@ function closeImageModal() {
     elements.imageModal.hidden = true;
 }
 
+function showSessionLoadingBar() {
+    if (elements.sessionLoadingBar) {
+        elements.sessionLoadingBar.hidden = false;
+        // 使用 setTimeout 确保元素先显示，然后触发动画
+        setTimeout(() => {
+            elements.sessionLoadingBar.classList.add('loading');
+        }, 10);
+    }
+}
+
+function hideSessionLoadingBar() {
+    if (elements.sessionLoadingBar) {
+        elements.sessionLoadingBar.classList.remove('loading');
+        elements.sessionLoadingBar.classList.add('complete');
+        // 等待动画结束后隐藏
+        setTimeout(() => {
+            elements.sessionLoadingBar.hidden = true;
+            elements.sessionLoadingBar.classList.remove('complete');
+        }, 500);
+    }
+}
+
 // ========================================
 // 会话管理
 // ========================================
@@ -273,8 +296,15 @@ async function loadSessions() {
 async function selectSession(sessionId) {
     state.currentSessionId = sessionId;
     renderSessionList();
+    
+    // 显示加载进度条
+    showSessionLoadingBar();
 
     const session = await getSession(sessionId);
+    
+    // 隐藏加载进度条
+    hideSessionLoadingBar();
+    
     if (session) {
         renderMessages(session.messages);
 

@@ -1160,6 +1160,7 @@ body.admin-page {
 .message {
     display: flex;
     gap: var(--spacing-md);
+    color: var(--text-muted);
     animation: fadeIn 0.3s ease;
 }
 
@@ -1303,6 +1304,43 @@ body.admin-page {
     color: var(--text-muted);
     font-size: 0.8rem;
     margin-top: var(--spacing-xs);
+}
+
+/* ========================================
+   会话加载进度条
+   ======================================== */
+.session-loading-bar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 0;
+    height: 3px;
+    background: linear-gradient(90deg, #a855f7, #6366f1, #ec4899);
+    background-size: 200% 100%;
+    z-index: 9999;
+    transition: width 0.3s ease;
+    animation: shimmerProgress 1.5s ease-in-out infinite;
+    box-shadow: 0 0 10px rgba(168, 85, 247, 0.5);
+}
+
+.session-loading-bar.loading {
+    width: 90%;
+}
+
+.session-loading-bar.complete {
+    width: 100%;
+    transition: width 0.2s ease, opacity 0.3s ease 0.2s;
+    opacity: 0;
+}
+
+@keyframes shimmerProgress {
+    0% {
+        background-position: 200% 0;
+    }
+
+    100% {
+        background-position: -200% 0;
+    }
 }
 
 /* ========================================
