@@ -9,6 +9,8 @@ import json
 import uuid
 import base64
 import logging
+import time
+import threading
 from datetime import datetime, timedelta
 from functools import wraps
 from PIL import Image
@@ -123,6 +125,32 @@ client = genai.Client(
 
 # 存储活跃的聊天会话（内存中）
 active_chats = {}
+
+# 自动清理长时间未使用的聊天会话，释放内存
+# 用户回来时会通过 rebuild_chat_history 从 JSON 自动重建
+CHAT_IDLE_TIMEOUT = int(os.getenv("CHAT_IDLE_TIMEOUT", 1800))  # 默认30分钟（秒）
+CHAT_CLEANUP_INTERVAL = int(os.getenv("CHAT_CLEANUP_INTERVAL", 600))  # 默认10分钟检查一次
+
+def cleanup_inactive_chats():
+    """后台线程：定期清理长时间未使用的聊天会话，释放内存"""
+    while True:
+        time.sleep(CHAT_CLEANUP_INTERVAL)
+        try:
+            now = time.time()
+            to_delete = [
+                sid for sid, data in active_chats.items()
+                if now - data.get("last_access", 0) > CHAT_IDLE_TIMEOUT
+            ]
+            for sid in to_delete:
+                del active_chats[sid]
+            if to_delete:
+                logger.info(f"已清理 {len(to_delete)} 个闲置会话，当前活跃: {len(active_chats)}")
+        except Exception as e:
+            logger.error(f"清理闲置会话时出错: {e}")
+
+cleanup_thread = threading.Thread(target=cleanup_inactive_chats, daemon=True)
+cleanup_thread.start()
+logger.info(f"会话自动清理已启动（闲置超时: {CHAT_IDLE_TIMEOUT}s, 检查间隔: {CHAT_CLEANUP_INTERVAL}s）")
 
 
 def login_required(f):
@@ -316,7 +344,8 @@ def create_chat(session_id, aspect_ratio="auto", image_size="2K", model=DEFAULT_
         "chat": chat,
         "aspect_ratio": aspect_ratio,
         "image_size": image_size,
-        "model": model
+        "model": model,
+        "last_access": time.time()
     }
     return chat
 
@@ -325,6 +354,7 @@ def get_or_create_chat(session_id, aspect_ratio="auto", image_size="2K", model=D
     """获取或创建聊天实例"""
     if session_id in active_chats:
         chat_data = active_chats[session_id]
+        chat_data["last_access"] = time.time()  # 更新最后访问时间
         # 如果配置变了，重新创建
         if (chat_data["aspect_ratio"] != aspect_ratio or 
             chat_data["image_size"] != image_size or 
