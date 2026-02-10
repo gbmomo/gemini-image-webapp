@@ -209,11 +209,82 @@ def create_thumbnail(image_path, thumbnail_filename, max_size=400, quality=60):
         return None
 
 
-def create_chat(session_id, aspect_ratio="auto", image_size="2K", model=DEFAULT_MODEL):
-    """创建新的聊天实例"""
-    # 使用 gemini-3-pro-image-preview（Nano Banana Pro）
-    # 支持 image_size 参数（1K/2K/4K）
+def rebuild_chat_history(user_id, session_id):
+    """从保存的消息历史重建 Gemini Chat 的 history 参数"""
+    sessions = load_sessions(user_id)
+    if session_id not in sessions:
+        return []
     
+    messages = sessions[session_id].get("messages", [])
+    if not messages:
+        return []
+    
+    mime_map = {
+        '.png': 'image/png',
+        '.jpg': 'image/jpeg',
+        '.jpeg': 'image/jpeg',
+        '.gif': 'image/gif',
+        '.webp': 'image/webp'
+    }
+    
+    history = []
+    for msg in messages:
+        parts = []
+        role = msg.get("role", "user")
+        
+        if role == "user":
+            # 添加参考图片
+            ref_images = msg.get("reference_images") or []
+            for ref_img in ref_images:
+                ref_path = os.path.join(IMAGES_DIR, os.path.basename(ref_img))
+                if os.path.exists(ref_path):
+                    try:
+                        with open(ref_path, "rb") as f:
+                            image_data = f.read()
+                        ext = os.path.splitext(ref_path)[1].lower()
+                        mime_type = mime_map.get(ext, 'image/png')
+                        parts.append(types.Part.from_bytes(
+                            data=image_data, mime_type=mime_type
+                        ))
+                    except Exception as e:
+                        logger.warning(f"重建历史时加载参考图片失败 {ref_img}: {e}")
+            
+            # 添加文本
+            if msg.get("content"):
+                parts.append(msg["content"])
+            
+            if parts:
+                history.append(types.Content(role="user", parts=parts))
+        
+        elif role == "assistant":
+            # 添加文本
+            if msg.get("content"):
+                parts.append(msg["content"])
+            
+            # 添加生成的图片
+            if msg.get("image"):
+                image_filename = os.path.basename(msg["image"])
+                image_path = os.path.join(IMAGES_DIR, image_filename)
+                if os.path.exists(image_path):
+                    try:
+                        with open(image_path, "rb") as f:
+                            image_data = f.read()
+                        ext = os.path.splitext(image_path)[1].lower()
+                        mime_type = mime_map.get(ext, 'image/png')
+                        parts.append(types.Part.from_bytes(
+                            data=image_data, mime_type=mime_type
+                        ))
+                    except Exception as e:
+                        logger.warning(f"重建历史时加载生成图片失败 {msg['image']}: {e}")
+            
+            if parts:
+                history.append(types.Content(role="model", parts=parts))
+    
+    return history
+
+
+def create_chat(session_id, aspect_ratio="auto", image_size="2K", model=DEFAULT_MODEL, user_id=None):
+    """创建新的聊天实例，如果有历史消息则自动恢复上下文"""
     if aspect_ratio == "auto":
         image_config = types.ImageConfig(
             image_size=image_size,
@@ -228,7 +299,19 @@ def create_chat(session_id, aspect_ratio="auto", image_size="2K", model=DEFAULT_
         response_modalities=['TEXT', 'IMAGE'],
         image_config=image_config
     )
-    chat = client.chats.create(model=model, config=config)
+    
+    # 从保存的消息历史重建 Chat 上下文
+    history = []
+    if user_id:
+        try:
+            history = rebuild_chat_history(user_id, session_id)
+            if history:
+                logger.info(f"为会话 {session_id} 重建了 {len(history)} 条历史消息")
+        except Exception as e:
+            logger.error(f"重建聊天历史失败: {e}", exc_info=True)
+            history = []
+    
+    chat = client.chats.create(model=model, config=config, history=history)
     active_chats[session_id] = {
         "chat": chat,
         "aspect_ratio": aspect_ratio,
@@ -238,7 +321,7 @@ def create_chat(session_id, aspect_ratio="auto", image_size="2K", model=DEFAULT_
     return chat
 
 
-def get_or_create_chat(session_id, aspect_ratio="auto", image_size="2K", model=DEFAULT_MODEL):
+def get_or_create_chat(session_id, aspect_ratio="auto", image_size="2K", model=DEFAULT_MODEL, user_id=None):
     """获取或创建聊天实例"""
     if session_id in active_chats:
         chat_data = active_chats[session_id]
@@ -246,9 +329,9 @@ def get_or_create_chat(session_id, aspect_ratio="auto", image_size="2K", model=D
         if (chat_data["aspect_ratio"] != aspect_ratio or 
             chat_data["image_size"] != image_size or 
             chat_data.get("model") != model):
-            return create_chat(session_id, aspect_ratio, image_size, model)
+            return create_chat(session_id, aspect_ratio, image_size, model, user_id)
         return chat_data["chat"]
-    return create_chat(session_id, aspect_ratio, image_size, model)
+    return create_chat(session_id, aspect_ratio, image_size, model, user_id)
 
 
 @app.route("/")
@@ -524,7 +607,7 @@ def generate_image():
             update_user_credits(user_id, -cost)
 
         # 获取或创建聊天实例
-        chat = get_or_create_chat(session_id, aspect_ratio, image_size, DEFAULT_MODEL)
+        chat = get_or_create_chat(session_id, aspect_ratio, image_size, DEFAULT_MODEL, user_id)
 
         # 构建消息内容
         contents = []
