@@ -11,8 +11,12 @@ const state = {
     selectedAspectRatio: 'auto',
     selectedModel: 'gemini-3-pro-image-preview',  // 固定使用Nano Banana Pro
     isGenerating: false,
-    isSettingsLocked: false  // 会话生成后锁定设置
+    isSettingsLocked: false,  // 会话生成后锁定设置
+    isLoadingSession: false   // 会话历史加载中
 };
+
+// 会话数据缓存（避免重复加载）
+const sessionCache = new Map();
 
 // DOM 元素
 const elements = {
@@ -165,6 +169,7 @@ function renderSessionList() {
             e.stopPropagation();
             const sessionId = btn.dataset.id;
             await deleteSession(sessionId);
+            sessionCache.delete(sessionId);
             state.sessions = state.sessions.filter(s => s.id !== sessionId);
             if (state.currentSessionId === sessionId) {
                 state.currentSessionId = null;
@@ -263,6 +268,8 @@ function closeImageModal() {
 }
 
 function showSessionLoadingBar() {
+    state.isLoadingSession = true;
+
     if (elements.sessionLoadingBar) {
         elements.sessionLoadingBar.hidden = false;
         // 使用 setTimeout 确保元素先显示，然后触发动画
@@ -270,9 +277,17 @@ function showSessionLoadingBar() {
             elements.sessionLoadingBar.classList.add('loading');
         }, 10);
     }
+
+    // 禁用控制面板，防止加载期间误操作
+    const controlPanel = document.querySelector('.control-panel');
+    if (controlPanel) {
+        controlPanel.classList.add('panel-disabled');
+    }
 }
 
 function hideSessionLoadingBar() {
+    state.isLoadingSession = false;
+
     if (elements.sessionLoadingBar) {
         elements.sessionLoadingBar.classList.remove('loading');
         elements.sessionLoadingBar.classList.add('complete');
@@ -281,6 +296,12 @@ function hideSessionLoadingBar() {
             elements.sessionLoadingBar.hidden = true;
             elements.sessionLoadingBar.classList.remove('complete');
         }, 500);
+    }
+
+    // 恢复控制面板
+    const controlPanel = document.querySelector('.control-panel');
+    if (controlPanel) {
+        controlPanel.classList.remove('panel-disabled');
     }
 }
 
@@ -294,27 +315,40 @@ async function loadSessions() {
 }
 
 async function selectSession(sessionId) {
+    if (state.isLoadingSession) return;
+
     state.currentSessionId = sessionId;
     renderSessionList();
-    
-    // 显示加载进度条
-    showSessionLoadingBar();
 
-    const session = await getSession(sessionId);
-    
-    // 隐藏加载进度条
-    hideSessionLoadingBar();
-    
-    if (session) {
-        renderMessages(session.messages);
-
-        // 检查会话是否有锁定的设置
-        if (session.settings) {
-            // 应用锁定的设置
-            applyLockedSettings(session.settings);
+    // 检查缓存
+    const cached = sessionCache.get(sessionId);
+    if (cached) {
+        // 缓存命中，直接渲染，无需加载条
+        renderMessages(cached.messages);
+        if (cached.settings) {
+            applyLockedSettings(cached.settings);
             lockSettings();
         } else {
             unlockSettings();
+        }
+    } else {
+        // 缓存未命中，从服务器加载
+        showSessionLoadingBar();
+
+        const session = await getSession(sessionId);
+
+        hideSessionLoadingBar();
+
+        if (session) {
+            sessionCache.set(sessionId, session);
+            renderMessages(session.messages);
+
+            if (session.settings) {
+                applyLockedSettings(session.settings);
+                lockSettings();
+            } else {
+                unlockSettings();
+            }
         }
     }
 
@@ -351,6 +385,7 @@ async function handleNewChat() {
 const MAX_IMAGES = 14;
 
 function handleImageUpload(files) {
+    if (state.isLoadingSession) return;
     if (!files || files.length === 0) return;
 
     const fileArray = Array.from(files);
@@ -404,6 +439,8 @@ function clearReferenceImages() {
 // ========================================
 
 async function handleGenerate() {
+    if (state.isLoadingSession) return;
+
     const prompt = elements.promptInput.value.trim();
 
     if (!prompt) {
@@ -463,6 +500,7 @@ async function handleGenerate() {
         // 重新加载消息
         const sessionData = await getSession(state.currentSessionId);
         if (sessionData) {
+            sessionCache.set(state.currentSessionId, sessionData);
             renderMessages(sessionData.messages);
 
             // 检查并应用锁定状态
@@ -607,7 +645,7 @@ function bindEvents() {
 
     // 回车生成（Ctrl+Enter）
     elements.promptInput.addEventListener('keydown', (e) => {
-        if (e.ctrlKey && e.key === 'Enter') {
+        if (e.ctrlKey && e.key === 'Enter' && !state.isLoadingSession) {
             handleGenerate();
         }
     });
@@ -721,11 +759,17 @@ async function init() {
         renderSessionList();
         // 如果有当前会话，重新渲染消息以更新图片alt等文本
         if (state.currentSessionId) {
-            getSession(state.currentSessionId).then(session => {
-                if (session) {
-                    renderMessages(session.messages);
-                }
-            });
+            const cached = sessionCache.get(state.currentSessionId);
+            if (cached) {
+                renderMessages(cached.messages);
+            } else {
+                getSession(state.currentSessionId).then(session => {
+                    if (session) {
+                        sessionCache.set(state.currentSessionId, session);
+                        renderMessages(session.messages);
+                    }
+                });
+            }
         }
     });
 }

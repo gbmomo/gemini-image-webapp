@@ -1343,6 +1343,13 @@ body.admin-page {
     }
 }
 
+/* 会话加载期间禁用控制面板 */
+.control-panel.panel-disabled {
+    pointer-events: none;
+    opacity: 0.5;
+    transition: opacity 0.2s ease;
+}
+
 /* ========================================
    模态框
    ======================================== */
