@@ -336,15 +336,14 @@ def rebuild_chat_history(user_id, session_id):
                         image_part = types.Part.from_bytes(
                             data=image_data, mime_type=mime_type
                         )
-                        
-                        # 如果保存了 thought_signature，则附加到图片部分
+
+                        # 附加 thought_signature（Gemini API 多轮对话必需）
                         if msg.get("thought_signature"):
-                            # 从 base64 字符串解码回 bytes
                             signature = msg["thought_signature"]
                             if isinstance(signature, str):
                                 signature = base64.b64decode(signature)
                             image_part.thought_signature = signature
-                        
+
                         parts.append(image_part)
                     except Exception as e:
                         logger.warning(f"重建历史时加载生成图片失败 {msg['image']}: {e}")
@@ -581,10 +580,20 @@ def get_session_route(session_id):
     if session_id not in sessions:
         return jsonify({"error": "会话不存在"}), 404
     session_data = sessions[session_id]
+
+    # 过滤掉 thought_signature，前端不需要，避免传输大量数据
+    filtered_messages = []
+    for msg in session_data.get("messages", []):
+        filtered_msg = {k: v for k, v in msg.items() if k != "thought_signature"}
+        filtered_messages.append(filtered_msg)
+
     return jsonify({
         "id": session_id,
-        "settings": session_data.get("settings"),  # 包含锁定的设置
-        **session_data
+        "title": session_data.get("title"),
+        "created_at": session_data.get("created_at"),
+        "updated_at": session_data.get("updated_at"),
+        "messages": filtered_messages,
+        "settings": session_data.get("settings"),
     })
 
 
@@ -738,7 +747,7 @@ def generate_image():
             return jsonify({"error": "AI 未返回有效响应，请重试"}), 500
 
         result_thumbnail = None
-        image_thought_signature = None  # 保存图片的 thought_signature
+        image_thought_signature = None
         for part in response.parts:
             if part.text is not None:
                 result_text += part.text
@@ -746,19 +755,18 @@ def generate_image():
                 # 只保存第一张图片（防止重复保存）
                 image_filename = f"{session_id}_{datetime.now().strftime('%Y%m%d%H%M%S%f')}.png"
                 image_path = os.path.join(IMAGES_DIR, image_filename)
-                
+
                 image = part.as_image()
                 image.save(image_path)
                 result_image = f"/static/images/{image_filename}"
-                
-                # 提取 thought_signature（如果存在）
+
+                # 提取 thought_signature（Gemini API 多轮对话必需）
                 if hasattr(part, 'thought_signature') and part.thought_signature:
-                    # 转换为 base64 字符串以便 JSON 序列化
                     if isinstance(part.thought_signature, bytes):
                         image_thought_signature = base64.b64encode(part.thought_signature).decode('utf-8')
                     else:
                         image_thought_signature = part.thought_signature
-                
+
                 # 创建缩略图用于预览
                 thumbnail_filename = f"thumb_{image_filename.replace('.png', '.jpg')}"
                 result_thumbnail = create_thumbnail(image_path, thumbnail_filename)
@@ -780,7 +788,7 @@ def generate_image():
             "content": result_text,
             "image": result_image,
             "thumbnail": result_thumbnail if result_image else None,
-            "thought_signature": image_thought_signature,  # 保存 thought_signature
+            "thought_signature": image_thought_signature,
             "timestamp": now
         })
 
