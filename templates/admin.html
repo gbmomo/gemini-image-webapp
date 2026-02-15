@@ -77,6 +77,10 @@
                         清理7天前数据</button>
                 </div>
                 <div class="cleanup-group">
+                    <p class="cleanup-desc" data-i18n="cleanup_all_desc">清理所有数据：删除全部会话、图片、缩略图</p>
+                    <button class="btn-cleanup btn-danger" onclick="cleanupAllData()" data-i18n="cleanup_all">🗑️ 清理所有数据</button>
+                </div>
+                <div class="cleanup-group">
                     <p class="cleanup-desc" data-i18n="custom_cleanup_desc">自定义清理：清理指定日期前的所有数据（包含图片、缩略图、孤儿文件）</p>
                     <div class="date-cleanup-input">
                         <input type="text" id="cleanupDate" class="date-input" placeholder="YYYY-MM-DD" readonly>
@@ -487,6 +491,24 @@
 
             const date = new Date();
             date.setDate(date.getDate() - days);
+            const cutoffDate = date.toISOString().split('T')[0];
+
+            await performCleanup(cutoffDate);
+        }
+
+        async function cleanupAllData() {
+            const confirmed = await Modal.confirm(
+                I18n.t('cleanup_all_title') || '清理所有数据',
+                I18n.t('cleanup_all_msg') || '确定要清理所有数据吗？此操作将删除全部会话、图片和缩略图，且不可恢复！',
+                'warning'
+            );
+            if (!confirmed) {
+                return;
+            }
+
+            // 用明天的日期作为截止日期，确保所有数据都被清理
+            const date = new Date();
+            date.setDate(date.getDate() + 1);
             const cutoffDate = date.toISOString().split('T')[0];
 
             await performCleanup(cutoffDate);
