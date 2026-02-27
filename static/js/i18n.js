@@ -14,13 +14,13 @@ const DEFAULT_LANG = 'zh';  // 默认语言: 'zh' (中文) 或 'en' (英文)
 const translations = {
     zh: {
         // 页面标题
-        page_title: '码言旗下Nano Banana Pro AI图片生成器',
+        page_title: '码言旗下Nano Banana AI图片生成器',
 
         // 顶部横幅
         site_title: '码言nano',
-        site_subtitle: '在线使用Nano Banana Pro',
+        site_subtitle: '在线使用Nano Banana',
         banner_brand: '码言旗下',
-        banner_product: '🍌 Nano Banana Pro',
+        banner_product: '🍌 Nano Banana',
         banner_desc: '4K AI图片生成器',
         banner_price: '$0.04起/张',
         banner_trial: '免费试用',
@@ -50,7 +50,7 @@ const translations = {
         resolution_label: '分辨率(不同分辨率消耗点数数目不同)',
         aspect_ratio_label: '纵横比',
         model_label: 'AI 模型',
-        model_nano_banana_pro: 'Nano Banana Pro',
+        model_nano_banana_pro: 'Nano Banana',
         model_nano_banana_pro_desc: '专业创作',
         model_nano_banana_2: 'Nano Banana 2',
         model_nano_banana_2_desc: '最新模型',
@@ -93,7 +93,7 @@ const translations = {
 
         // 登录/注册
         welcome_back: '欢迎回来',
-        login_subtitle: '登录码言 Nano Banana Pro 创作',
+        login_subtitle: '登录码言 Nano Banana 创作',
         username: '用户名',
         username_placeholder: '请输入用户名',
         password: '密码',
@@ -102,7 +102,7 @@ const translations = {
         no_account: '还没有账号？',
         register_now: '立即注册',
         create_account: '创建账号',
-        register_subtitle: '加入码言 Nano Banana Pro 开启 AI 之旅',
+        register_subtitle: '加入码言 Nano Banana 开启 AI 之旅',
         username_hint: '至少3个字符',
         email: '邮箱',
         email_placeholder: '请输入邮箱地址',
@@ -167,7 +167,7 @@ const translations = {
         settings_locked_msg: '更改模型、分辨率或纵横比会重置对话记忆，AI 将无法记住之前生成的图片。<br><br>如需使用不同设置，请点击确定创建新对话。',
 
         // 管理后台
-        admin_page_title: '管理员控制台 - 码言旗下 Nano Banana Pro',
+        admin_page_title: '管理员控制台 - 码言旗下 Nano Banana',
         admin_title: '🛡️ 管理员控制台',
         admin_subtitle: '用户管理与数据监控',
         back_home: '← 返回主页',
@@ -256,13 +256,13 @@ const translations = {
     },
     en: {
         // Page title
-        page_title: 'GitSay Nano Banana Pro AI Image Generator',
+        page_title: 'GitSay Nano Banana AI Image Generator',
 
         // Top banner
         site_title: 'GitSay Nano',
-        site_subtitle: 'Use Nano Banana Pro Online',
+        site_subtitle: 'Use Nano Banana Online',
         banner_brand: 'GitSay',
-        banner_product: '🍌 Nano Banana Pro',
+        banner_product: '🍌 Nano Banana',
         banner_desc: '4K AI Image Generator',
         banner_price: 'From $0.04/image',
         banner_trial: 'Free Trial',
@@ -292,7 +292,7 @@ const translations = {
         resolution_label: 'Resolution (different resolutions cost different credits)',
         aspect_ratio_label: 'Aspect Ratio',
         model_label: 'AI Model',
-        model_nano_banana_pro: 'Nano Banana Pro',
+        model_nano_banana_pro: 'Nano Banana',
         model_nano_banana_pro_desc: 'Professional',
         model_nano_banana_2: 'Nano Banana 2',
         model_nano_banana_2_desc: 'Latest Model',
@@ -335,7 +335,7 @@ const translations = {
 
         // Login/Register
         welcome_back: 'Welcome Back',
-        login_subtitle: 'Login to GitSay Nano Banana Pro',
+        login_subtitle: 'Login to GitSay Nano Banana',
         username: 'Username',
         username_placeholder: 'Enter username',
         password: 'Password',
@@ -344,7 +344,7 @@ const translations = {
         no_account: "Don't have an account?",
         register_now: 'Register Now',
         create_account: 'Create Account',
-        register_subtitle: 'Join GitSay Nano Banana Pro to start your AI journey',
+        register_subtitle: 'Join GitSay Nano Banana to start your AI journey',
         username_hint: 'At least 3 characters',
         email: 'Email',
         email_placeholder: 'Enter email address',
@@ -409,7 +409,7 @@ const translations = {
         settings_locked_msg: 'Changing model, resolution or aspect ratio will reset chat memory, AI will not remember previously generated images.<br><br>Click OK to create a new chat with different settings.',
 
         // Admin panel
-        admin_page_title: 'Admin Console - GitSay Nano Banana Pro',
+        admin_page_title: 'Admin Console - GitSay Nano Banana',
         admin_title: '🛡️ Admin Console',
         admin_subtitle: 'GitSay · User Management & Data Monitoring',
         back_home: '← Back to Home',
