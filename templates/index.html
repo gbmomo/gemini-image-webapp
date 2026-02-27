@@ -125,11 +125,26 @@
 
 
 
-                <!-- 分辨率和宽高比 -->
+                <!-- 模型选择 & 分辨率和宽高比 -->
                 <div class="control-section">
                     <div class="section-header">
                         <span class="section-icon">⚙️</span>
-                        <span data-i18n="aspect_resolution">纵横比 & 分辨率</span>
+                        <span data-i18n="aspect_resolution">模型 & 纵横比 & 分辨率</span>
+                    </div>
+
+                    <!-- AI 模型 -->
+                    <div class="option-group">
+                        <label class="option-label" data-i18n="model_label">AI 模型</label>
+                        <div class="option-buttons model-buttons" id="modelButtons">
+                            <button class="option-btn model-btn" data-value="gemini-3-pro-image-preview">
+                                <span class="model-name" data-i18n="model_nano_banana_pro">Nano Banana Pro</span>
+                                <span class="model-desc" data-i18n="model_nano_banana_pro_desc">专业创作</span>
+                            </button>
+                            <button class="option-btn model-btn" data-value="gemini-3.1-flash-image-preview">
+                                <span class="model-name" data-i18n="model_nano_banana_2">Nano Banana 2</span>
+                                <span class="model-desc" data-i18n="model_nano_banana_2_desc">最新模型</span>
+                            </button>
+                        </div>
                     </div>
 
                     <!-- 分辨率 -->
@@ -167,7 +182,7 @@
                             <button class="option-btn" data-value="2:3" data-i18n="aspect_2_3">2:3 竖版</button>
                         </div>
                     </div>
-                    <p class="hint-text warning-hint" data-i18n="settings_warning">⚠️ 更改分辨率或纵横比会重置对话记忆，AI 将无法记住之前生成的图片
+                    <p class="hint-text warning-hint" data-i18n="settings_warning">⚠️ 更改模型、分辨率或纵横比会重置对话记忆，AI 将无法记住之前生成的图片
                     </p>
                 </div>
 
@@ -364,6 +379,7 @@
     <!-- 引入自定义 Modal 样式 -->
     <link rel="stylesheet" href="/static/css/modal.css">
 
+    <script>window.DEFAULT_MODEL = '{{ default_model }}';</script>
     <script src="/static/js/main.js"></script>
     <!-- 引入自定义 Modal 脚本 -->
     <script src="/static/js/modal.js"></script>

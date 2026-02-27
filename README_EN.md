@@ -98,6 +98,7 @@
 | **Image-to-Image** | Upload reference images, AI modifies based on description |
 | **Multi-turn Conversation** | AI remembers context, continuously iterates and optimizes images |
 | **Multiple References** | Support uploading up to 14 reference images |
+| **Model Selection** | Switch between Nano Banana Pro (professional) and Nano Banana 2 (fast & efficient) |
 | **High Resolution** | Supports 1K, 2K, 4K resolutions |
 | **Multiple Aspect Ratios** | 1:1, 16:9, 9:16, 4:3, 21:9 and more |
 | **Multi-language Support** | Chinese/English switching, configurable default language |
@@ -247,7 +248,8 @@ ADMIN_PASSWORD=YourAdminPassword
 # ========== Optional Configuration ==========
 
 # Gemini model to use (defaults to gemini-3-pro-image-preview)
-# Can be changed when new models are released
+# Options: gemini-3-pro-image-preview (Nano Banana Pro), gemini-3.1-flash-image-preview (Nano Banana 2)
+# This controls the default selected model in the UI; users can still switch in the interface
 # GEMINI_MODEL=gemini-3-pro-image-preview
 
 # If you need email verification for registration:
@@ -296,10 +298,11 @@ You'll see the following output when started successfully:
 - Give the conversation a name (optional)
 
 #### 3. Choose Parameters
+- **AI Model**: Nano Banana Pro (professional), Nano Banana 2 (fast & efficient)
 - **Resolution**: 1K (1 credit), 2K (2 credits), 4K (4 credits)
 - **Aspect Ratio**: Auto, 1:1, 16:9, 9:16, etc.
 
-> ⚠️ Note: Parameters are locked after first generation, create a new conversation to change them
+> ⚠️ Note: Model, resolution, and aspect ratio are locked after first generation, create a new conversation to change them
 
 #### 4. Generate Images
 
@@ -511,7 +514,8 @@ GEMINI_API_BASE_URL=http://your_proxy_address:port
 
 | Endpoint | Method | Description | Parameters |
 |----------|--------|-------------|------------|
-| `/api/generate` | POST | Generate image | `session_id`, `prompt`, `aspect_ratio`, `image_size`, `reference_images` |
+| `/api/generate` | POST | Generate image | `session_id`, `prompt`, `aspect_ratio`, `image_size`, `model`, `reference_images` |
+| `/api/models` | GET | Get available models | - |
 | `/api/redeem` | POST | Redeem code | `code` |
 
 ### Admin Endpoints

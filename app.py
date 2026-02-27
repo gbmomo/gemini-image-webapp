@@ -103,7 +103,7 @@ if not API_KEY:
 API_BASE_URL = os.getenv("GEMINI_API_BASE_URL")
 
 # 默认模型（可通过环境变量 GEMINI_MODEL 自定义）
-DEFAULT_MODEL = os.getenv("GEMINI_MODEL", "gemini-3-pro-image-preview")
+DEFAULT_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.1-flash-image-preview")
 SESSIONS_DIR = "data/sessions"  # 改为目录，每个用户一个文件
 IMAGES_DIR = "static/images"
 THUMBNAILS_DIR = "static/thumbnails"
@@ -111,6 +111,10 @@ THUMBNAILS_DIR = "static/thumbnails"
 # 安全配置常量
 ALLOWED_ASPECT_RATIOS = ["auto", "1:1", "16:9", "9:16", "4:3", "3:4", "21:9", "3:2", "2:3"]
 ALLOWED_IMAGE_SIZES = ["1K", "2K", "4K"]
+ALLOWED_MODELS = {
+    "gemini-3-pro-image-preview": "Nano Banana Pro",
+    "gemini-3.1-flash-image-preview": "Nano Banana 2",
+}
 MAX_PROMPT_LENGTH = 100000  # 支持长提示词
 MAX_REFERENCE_IMAGES = 14
 ALLOWED_IMAGE_EXTENSIONS = {'.png', '.jpg', '.jpeg', '.gif', '.webp', '.ico'}
@@ -413,7 +417,18 @@ def index():
     user = None
     if "user_id" in session:
         user = get_user_by_id(session["user_id"])
-    return render_template("index.html", user=user)
+    return render_template("index.html", user=user, default_model=DEFAULT_MODEL)
+
+
+@app.route("/api/models", methods=["GET"])
+@csrf.exempt
+def get_models():
+    """获取可用的图像生成模型列表"""
+    models = [
+        {"id": model_id, "name": name, "default": model_id == DEFAULT_MODEL}
+        for model_id, name in ALLOWED_MODELS.items()
+    ]
+    return jsonify({"models": models, "default": DEFAULT_MODEL})
 
 
 @app.route("/login")
@@ -659,17 +674,21 @@ def generate_image():
     prompt = data.get("prompt", "")
     aspect_ratio = data.get("aspect_ratio", "auto")
     image_size = data.get("image_size", "2K")
+    model = data.get("model", DEFAULT_MODEL)
     reference_images = data.get("reference_images", [])  # 改为数组
 
     # 输入验证
     if not session_id or not prompt:
         return jsonify({"error": "缺少必要参数"}), 400
-    
+
     if aspect_ratio not in ALLOWED_ASPECT_RATIOS:
         return jsonify({"error": "无效的纵横比参数"}), 400
-    
+
     if image_size not in ALLOWED_IMAGE_SIZES:
         return jsonify({"error": "无效的分辨率参数"}), 400
+
+    if model not in ALLOWED_MODELS:
+        return jsonify({"error": "无效的模型参数"}), 400
     
     if len(prompt.strip()) == 0:
         return jsonify({"error": "提示词不能为空"}), 400
@@ -689,6 +708,7 @@ def generate_image():
         settings = sessions[session_id]["settings"]
         aspect_ratio = settings.get("aspect_ratio", aspect_ratio)
         image_size = settings.get("image_size", image_size)
+        model = settings.get("model", model)
 
     try:
         # 检查点数 (管理员免消耗)
@@ -704,7 +724,7 @@ def generate_image():
             update_user_credits(user_id, -cost)
 
         # 获取或创建聊天实例
-        chat = get_or_create_chat(session_id, aspect_ratio, image_size, DEFAULT_MODEL, user_id)
+        chat = get_or_create_chat(session_id, aspect_ratio, image_size, model, user_id)
 
         # 构建消息内容
         contents = []
@@ -796,11 +816,11 @@ def generate_image():
         if len(sessions[session_id]["messages"]) == 2:
             # 用提示词的前20个字符作为标题
             sessions[session_id]["title"] = prompt[:20] + ("..." if len(prompt) > 20 else "")
-            # 首次生成，锁定分辨率和纵横比设置
+            # 首次生成，锁定分辨率、纵横比和模型设置
             sessions[session_id]["settings"] = {
                 "aspect_ratio": aspect_ratio,
                 "image_size": image_size,
-                "model": DEFAULT_MODEL
+                "model": model
             }
 
         sessions[session_id]["updated_at"] = now

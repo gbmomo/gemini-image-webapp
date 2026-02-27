@@ -98,6 +98,7 @@
 | **图生图** | 上传参考图片，AI 根据描述修改 |
 | **多轮对话** | AI 记住上下文，持续迭代优化图片 |
 | **多参考图** | 支持同时上传最多 14 张参考图片 |
+| **模型选择** | 支持 Nano Banana Pro（专业创作）和 Nano Banana 2（快速高效）两种模型切换 |
 | **高分辨率** | 支持 1K、2K、4K 三种分辨率 |
 | **多纵横比** | 1:1、16:9、9:16、4:3、21:9 等多种比例 |
 | **多语言支持** | 支持中英文切换，可配置默认语言 |
@@ -246,8 +247,9 @@ ADMIN_PASSWORD=你的管理员密码
 
 # ========== 可选配置 ==========
 
-# 使用的 Gemini 模型（默认使用最新的 gemini-3-pro-image-preview）
-# 如果未来有新模型发布，可以在此修改模型名称
+# 使用的 Gemini 模型（默认使用 gemini-3-pro-image-preview）
+# 可选值：gemini-3-pro-image-preview（Nano Banana Pro）、gemini-3.1-flash-image-preview（Nano Banana 2）
+# 此设置控制前端默认选中的模型，用户仍可在界面上切换
 # GEMINI_MODEL=gemini-3-pro-image-preview
 
 # 如果你需要邮箱验证码注册功能，请配置以下内容：
@@ -296,10 +298,11 @@ python app.py
 - 给对话起个名字（可选）
 
 #### 3. 选择参数
+- **AI 模型**：Nano Banana Pro（专业创作）、Nano Banana 2（快速高效）
 - **分辨率**：1K（1点）、2K（2点）、4K（4点）
 - **纵横比**：自动、1:1、16:9、9:16 等
 
-> ⚠️ 注意：首次生成后参数会被锁定，需要创建新对话才能更改
+> ⚠️ 注意：首次生成后模型、分辨率、纵横比参数会被锁定，需要创建新对话才能更改
 
 #### 4. 生成图片
 
@@ -511,7 +514,8 @@ GEMINI_API_BASE_URL=http://你的代理地址:端口
 
 | 接口 | 方法 | 描述 | 参数 |
 |------|------|------|------|
-| `/api/generate` | POST | 生成图片 | `session_id`, `prompt`, `aspect_ratio`, `image_size`, `reference_images` |
+| `/api/generate` | POST | 生成图片 | `session_id`, `prompt`, `aspect_ratio`, `image_size`, `model`, `reference_images` |
+| `/api/models` | GET | 获取可用模型列表 | - |
 | `/api/redeem` | POST | 卡密充值 | `code` |
 
 ### 管理员接口

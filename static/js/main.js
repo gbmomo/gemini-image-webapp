@@ -9,7 +9,7 @@ const state = {
     referenceImages: [],  // 改为数组，支持多张
     selectedResolution: '1K',
     selectedAspectRatio: 'auto',
-    selectedModel: 'gemini-3-pro-image-preview',  // 固定使用Nano Banana Pro
+    selectedModel: window.DEFAULT_MODEL || 'gemini-3.1-flash-image-preview',  // 从后端环境变量读取默认模型
     isGenerating: false,
     isSettingsLocked: false,  // 会话生成后锁定设置
     isLoadingSession: false   // 会话历史加载中
@@ -36,6 +36,7 @@ const elements = {
     resolutionGroup: document.getElementById('resolutionGroup'),
     resolutionButtons: document.getElementById('resolutionButtons'),
     aspectRatioButtons: document.getElementById('aspectRatioButtons'),
+    modelButtons: document.getElementById('modelButtons'),
     btnGenerate: document.getElementById('btnGenerate'),
 
     // 预览区域
@@ -97,7 +98,7 @@ async function deleteSession(sessionId) {
     }
 }
 
-async function generateImage(sessionId, prompt, aspectRatio, imageSize, referenceImages) {
+async function generateImage(sessionId, prompt, aspectRatio, imageSize, referenceImages, model) {
     try {
         const response = await fetch('/api/generate', {
             method: 'POST',
@@ -107,7 +108,8 @@ async function generateImage(sessionId, prompt, aspectRatio, imageSize, referenc
                 prompt,
                 aspect_ratio: aspectRatio,
                 image_size: imageSize,
-                reference_images: referenceImages  // 改为数组
+                reference_images: referenceImages,  // 改为数组
+                model: model
             })
         });
 
@@ -454,12 +456,14 @@ async function handleGenerate() {
         // 保存用户当前选择的设置
         const currentResolution = state.selectedResolution;
         const currentAspectRatio = state.selectedAspectRatio;
+        const currentModel = state.selectedModel;
 
         await handleNewChat();
 
         // 恢复用户的设置（handleNewChat会重置为默认值）
         state.selectedResolution = currentResolution;
         state.selectedAspectRatio = currentAspectRatio;
+        state.selectedModel = currentModel;
 
         // 更新UI按钮状态
         elements.resolutionButtons.querySelectorAll('.option-btn').forEach(btn => {
@@ -467,6 +471,9 @@ async function handleGenerate() {
         });
         elements.aspectRatioButtons.querySelectorAll('.option-btn').forEach(btn => {
             btn.classList.toggle('active', btn.dataset.value === currentAspectRatio);
+        });
+        elements.modelButtons.querySelectorAll('.option-btn').forEach(btn => {
+            btn.classList.toggle('active', btn.dataset.value === currentModel);
         });
     }
 
@@ -478,7 +485,8 @@ async function handleGenerate() {
             prompt,
             state.selectedAspectRatio,
             state.selectedResolution,
-            state.referenceImages  // 改为数组
+            state.referenceImages,  // 改为数组
+            state.selectedModel
         );
 
         // 更新会话标题
@@ -551,12 +559,16 @@ function lockSettings() {
     // 添加锁定样式
     elements.resolutionButtons.classList.add('settings-locked');
     elements.aspectRatioButtons.classList.add('settings-locked');
+    elements.modelButtons.classList.add('settings-locked');
 
     // 禁用所有按钮
     elements.resolutionButtons.querySelectorAll('.option-btn').forEach(btn => {
         btn.classList.add('locked');
     });
     elements.aspectRatioButtons.querySelectorAll('.option-btn').forEach(btn => {
+        btn.classList.add('locked');
+    });
+    elements.modelButtons.querySelectorAll('.option-btn').forEach(btn => {
         btn.classList.add('locked');
     });
 }
@@ -567,12 +579,16 @@ function unlockSettings() {
     // 移除锁定样式
     elements.resolutionButtons.classList.remove('settings-locked');
     elements.aspectRatioButtons.classList.remove('settings-locked');
+    elements.modelButtons.classList.remove('settings-locked');
 
     // 启用所有按钮
     elements.resolutionButtons.querySelectorAll('.option-btn').forEach(btn => {
         btn.classList.remove('locked');
     });
     elements.aspectRatioButtons.querySelectorAll('.option-btn').forEach(btn => {
+        btn.classList.remove('locked');
+    });
+    elements.modelButtons.querySelectorAll('.option-btn').forEach(btn => {
         btn.classList.remove('locked');
     });
 }
@@ -593,6 +609,14 @@ function applyLockedSettings(settings) {
             btn.classList.toggle('active', btn.dataset.value === settings.aspect_ratio);
         });
     }
+
+    // 应用锁定的模型
+    if (settings.model) {
+        state.selectedModel = settings.model;
+        elements.modelButtons.querySelectorAll('.option-btn').forEach(btn => {
+            btn.classList.toggle('active', btn.dataset.value === settings.model);
+        });
+    }
 }
 
 function resetSettingsToDefault() {
@@ -606,6 +630,13 @@ function resetSettingsToDefault() {
     state.selectedAspectRatio = 'auto';
     elements.aspectRatioButtons.querySelectorAll('.option-btn').forEach(btn => {
         btn.classList.toggle('active', btn.dataset.value === 'auto');
+    });
+
+    // 重置模型为默认值
+    const defaultModel = window.DEFAULT_MODEL || 'gemini-3-pro-image-preview';
+    state.selectedModel = defaultModel;
+    elements.modelButtons.querySelectorAll('.option-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.value === defaultModel);
     });
 }
 
@@ -694,6 +725,7 @@ function bindEvents() {
     // 选项按钮
     setupOptionButtons(elements.resolutionButtons, 'selectedResolution');
     setupOptionButtons(elements.aspectRatioButtons, 'selectedAspectRatio');
+    setupOptionButtons(elements.modelButtons, 'selectedModel');
 
     // 模态框
     elements.modalBackdrop.addEventListener('click', closeImageModal);
@@ -747,6 +779,12 @@ function closeSidebar() {
 
 async function init() {
     bindEvents();
+
+    // 初始化模型按钮选中状态（根据后端传入的默认模型）
+    elements.modelButtons.querySelectorAll('.option-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.value === state.selectedModel);
+    });
+
     await loadSessions();
 
     // 如果有会话，选择第一个

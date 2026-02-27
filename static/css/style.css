@@ -957,6 +957,7 @@ body.admin-page {
 /* 模型选择按钮样式 */
 .model-buttons {
     display: flex;
+    flex-wrap: wrap;
     gap: var(--spacing-sm);
 }
 
@@ -970,7 +971,7 @@ body.admin-page {
     min-width: 140px;
 }
 
-.model-label {
+.model-name {
     font-weight: 600;
     font-size: 0.9rem;
 }
