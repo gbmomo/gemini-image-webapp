@@ -247,10 +247,11 @@ ADMIN_PASSWORD=YourAdminPassword
 
 # ========== Optional Configuration ==========
 
-# Gemini model to use (defaults to gemini-3-pro-image-preview)
-# Options: gemini-3-pro-image-preview (Nano Banana Pro), gemini-3.1-flash-image-preview (Nano Banana 2)
+# Gemini model to use (defaults to gemini-3.1-flash-image-preview, i.e. Nano Banana 2)
+# Options: gemini-3.1-flash-image-preview (Nano Banana 2, fast & efficient, DEFAULT)
+#          gemini-3-pro-image-preview (Nano Banana Pro, professional)
 # This controls the default selected model in the UI; users can still switch in the interface
-# GEMINI_MODEL=gemini-3-pro-image-preview
+# GEMINI_MODEL=gemini-3.1-flash-image-preview
 
 # If you need email verification for registration:
 # EMAIL_SENDER=your_email@qq.com
@@ -361,55 +362,294 @@ Login with `admin` account, click "Admin Dashboard" in the top right to enter ad
 
 ---
 
-## 🌐 Production Deployment
+## 🌐 Production Deployment (BT Panel)
 
-If you want to deploy the website on a server for public access, refer to these steps:
+If you want to deploy the website on a server for public access, we recommend using **BT Panel (宝塔面板)** for deployment — it's simple and beginner-friendly.
 
-### Method 1: 1Panel Deployment (Recommended)
+> 💡 BT Panel official website: [https://www.bt.cn](https://www.bt.cn). Reference tutorial: [BT Panel Python Website Deployment Tutorial](https://www.bt.cn/bbs/thread-144409-1-1.html)
 
-#### 1. Upload Project Code
-Upload project code via 1Panel file manager or SFTP, e.g., to `/python-envs/nano-banana`
+### Prerequisites
 
-#### 2. Create Runtime Environment
-Go to 1Panel → "Websites" → "Runtime" → "Create Runtime", fill in:
+1. A cloud server with **Linux** installed (Ubuntu 20.04 / CentOS 7.9+ recommended)
+2. **BT Panel** installed (version 9.0+ recommended), installation commands available at [BT Panel Official Website](https://www.bt.cn/new/download.html)
+3. Install **Nginx** (1.24+ recommended) in BT Panel via "Software Store"
+4. A **domain name** with DNS resolved to your server IP
+
+### Step 0: Prepare Python Environment
+
+Before deploying the project, you need to install a Python environment and create a virtual environment in BT Panel.
+
+#### a. Install Python Version
+
+1. In the BT Panel left menu, click **"Website"** → **"Python Project"**
+2. Click **"Environment Management"** in the top right
+3. Click **"Version Management"**
+4. Find **Python 3.14.3** (or any other 3.10+ version), click **"Install"**
+5. Wait for the installation to complete (takes a few minutes)
+
+<p align="center">
+  <img src="Display pictures/BT/python版本安装界面.png" alt="Python Version Installation" width="80%">
+</p>
+
+#### b. Create Virtual Environment
+
+After installing the Python version, it's recommended to create an **isolated virtual environment** for this project, to avoid dependency conflicts between different projects.
+
+1. In the "Environment Management" page, select the installed Python version
+2. Click **"Create Virtual Environment"**
+3. Enter a name for the virtual environment, e.g., `gitsay_gemini_nano`
+4. Click confirm to create
+
+<p align="center">
+  <img src="Display pictures/BT/创建虚拟环境界面.png" alt="Create Virtual Environment" width="80%">
+</p>
+
+> 💡 **Why use a virtual environment?**
+> A virtual environment isolates this project's dependencies from the system environment, preventing package version conflicts between different projects, making them easier to manage and maintain.
+
+### Step 1: Upload Project Code
+
+1. Login to BT Panel, navigate to **"Files"** management
+2. Navigate to `/www/wwwroot/` directory
+3. Click **"Upload"** to upload the entire project folder, e.g., the path after upload:
+   ```
+   /www/wwwroot/gemini-image-webapp
+   ```
+4. You can also use SFTP tools (e.g., WinSCP, FileZilla) to upload
+
+> 💡 You can also use `git clone` in the terminal to pull the project code directly:
+> ```bash
+> cd /www/wwwroot
+> git clone https://github.com/gbmomo/gemini-image-webapp.git
+> ```
+
+### Step 2: Create Python Project
+
+1. In the BT Panel left menu, click **"Website"**
+2. Click the **"Python Project"** tab
+3. Click **"Add Python Project"** and fill in the following:
+
+<p align="center">
+  <img src="Display pictures/BT/宝塔面板添加python项目.png" alt="BT Panel Add Python Project" width="80%">
+</p>
 
 | Setting | Value |
 |---------|-------|
-| **Name** | nano-banana (customize) |
-| **Project Directory** | Select your uploaded project path |
-| **Start Command** | `pip install -r requirements.txt && gunicorn -w 6 -b 0.0.0.0:5000 --timeout 300 app:app` |
-| **Application** | Python 3.10+ |
-| **Container Name** | nano-banana (customize) |
+| **Project Name** | `gemini-image-webapp` (customize as you like) |
+| **Python Environment** | Select `Python 3.10+` (click "Environment Management" on the right to install if none available) |
+| **Start Method** | Select `gunicorn` |
+| **Project Path** | `/www/wwwroot/gemini-image-webapp` (your uploaded project path) |
+| **Start Command** | `gunicorn -w 3 -b 0.0.0.0:5000 --timeout 300 app:app` |
+| **Environment Variables** | Select "Specify Variables" (see Step 3 for details) |
+| **Start User** | `www` (default is fine) |
+| **Install Dependencies** | Enter the path to `requirements.txt`, or leave empty and install manually |
 
-#### 3. Configure Environment Variables
-Switch to "Environment Variables" tab, add the following:
+> ⚠️ **Start command explanation**:
+> - `-w 3`: Start 3 worker processes (adjust based on server CPU cores, generally `2 * CPU cores + 1`)
+> - `-b 0.0.0.0:5000`: Listen on all network interfaces on port 5000
+> - `--timeout 300`: 300-second timeout (AI image generation takes time, don't set too short)
+> - `app:app`: Flask application entry point
 
-| Variable | Description |
-|----------|-------------|
-| `GEMINI_API_KEY` | Your Gemini API Key |
-| `SECRET_KEY` | Random string for session encryption |
-| `ADMIN_PASSWORD` | Admin password |
-| `FLASK_DEBUG` | `False` |
-| `EMAIL_SENDER` | Sender email (optional) |
-| `EMAIL_PASSWORD` | Email authorization code (optional) |
-| `SMTP_SERVER` | SMTP server (optional) |
-| `SMTP_PORT` | SMTP port (optional) |
+### Step 3: Configure Environment Variables
 
-#### 4. Configure Port
-Switch to "Ports" tab, add port mapping: `5000`
+When creating the project, select **"Specify Variables"** in the Environment Variables section, then add the following variables line by line (you can also modify them later in the project **"Settings"**):
 
-#### 5. Create Website and Configure Reverse Proxy
-- Go to "Websites" → "Create Website" → "Reverse Proxy"
-- Enter domain, proxy address: `http://127.0.0.1:5000`
-- Apply for SSL certificate, enable HTTPS
+<p align="center">
+  <img src="Display pictures/BT/环境变量配置界面.png" alt="Environment Variables Configuration" width="80%">
+</p>
+
+```env
+EMAIL_SENDER=your_email@example.com
+ADMIN_PASSWORD=YourAdminPassword
+SMTP_SERVER=smtp.exmail.qq.com
+EMAIL_PASSWORD=YourEmailAuthCode
+SMTP_PORT=465
+GEMINI_API_KEY=YourGeminiAPIKey
+FLASK_ENV=production
+SECRET_KEY=YourRandomSecretKeyString
+FLASK_DEBUG=False
+```
+
+| Variable | Description | Required |
+|----------|-------------|----------|
+| `GEMINI_API_KEY` | Your Google Gemini API Key | ✅ Required |
+| `SECRET_KEY` | Random encryption string for session encryption | ✅ Required |
+| `ADMIN_PASSWORD` | Admin login password | ✅ Required |
+| `FLASK_ENV` | Set to `production` | ✅ Required |
+| `FLASK_DEBUG` | Set to `False` | ✅ Required |
+| `EMAIL_SENDER` | Sender email address | Optional (required for registration) |
+| `EMAIL_PASSWORD` | Email SMTP authorization code | Optional |
+| `SMTP_SERVER` | SMTP server address | Optional |
+| `SMTP_PORT` | SMTP port number (usually 465) | Optional |
+
+> ⚠️ **Note**: After configuring environment variables, you need to **restart the project** for changes to take effect.
+
+### Step 4: Start Project and Verify
+
+1. After configuration, click **"Start"** or **"Restart"** button
+2. Check project status, confirm it shows **"Running"**
+3. Check project logs, confirm no error messages
+
+<p align="center">
+  <img src="Display pictures/BT/项目运行状态.png" alt="Project Running Status" width="80%">
+</p>
+
+4. Visit `http://YourServerIP:5000` in your browser to confirm the website is accessible
+
+> 💡 If you can't access it, check:
+> - Whether port 5000 is allowed in BT Panel "Security"
+> - Whether port 5000 is open in your server's security group (e.g., AWS/GCP/Alibaba Cloud)
+> - Whether there are error messages in the project logs
+
+### Step 5: Configure Domain and External Access
+
+#### 5.1 Bind Domain
+
+1. In the Python project list, click the project to enter **"Settings"**
+2. Find the **"Domain Management"** section
+3. Add your domain, e.g., `nano.gitsay.com`
+
+<p align="center">
+  <img src="Display pictures/BT/域名绑定界面.png" alt="Domain Binding" width="80%">
+</p>
+
+#### 5.2 Enable External Mapping
+
+1. In the project settings, find the **"External Mapping"** option
+2. Click **"Enable External Mapping"** and fill in the following:
+
+<p align="center">
+  <img src="Display pictures/BT/外网映射配置.png" alt="External Mapping Configuration" width="80%">
+</p>
+
+| Setting | Value |
+|---------|-------|
+| **Proxy Route** | `/` |
+| **Proxy Port** | `5000` |
+
+3. Click save, BT Panel will automatically create an Nginx reverse proxy website
+
+### Step 6: Configure SSL Certificate (HTTPS)
+
+1. In the BT Panel left menu, click **"Website"**
+2. Find the website created by the mapping, click **"Settings"**
+3. Click the **"SSL"** tab on the left
+4. Choose one of the following methods to apply for a certificate:
+   - **Let's Encrypt**: Free certificate, click "Apply" to auto-issue
+   - **BT Certificate**: Free certificate provided by BT Panel
+   - **Other Certificate**: If you already have a certificate, paste the PEM-format certificate and key
+
+<p align="center">
+  <img src="Display pictures/BT/SSL证书申请.png" alt="SSL Certificate Application" width="80%">
+</p>
+
+5. After certificate is issued, enable **"Force HTTPS"**
+
+### Step 7: Optimize Nginx Configuration (Recommended)
+
+After the website is created, you can optimize the Nginx configuration via **"Settings" → "Configuration File"** to better support the AI image generation service.
+
+Here's a recommended configuration reference that you can modify according to your needs:
+
+```nginx
+server
+{
+    listen 80;
+    listen 443 ssl;
+    listen 443 quic;
+    http2 on;
+    server_name yourdomain.com;
+    index index.html index.htm default.htm default.html;
+    root /www/wwwroot/gemini-image-webapp;
+
+    #SSL-START SSL Configuration
+    ssl_certificate    /www/server/panel/vhost/cert/YourSiteName/fullchain.pem;
+    ssl_certificate_key    /www/server/panel/vhost/cert/YourSiteName/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers EECDH+CHACHA20:EECDH+CHACHA20-draft:EECDH+AES128:RSA+AES128:EECDH+AES256:RSA+AES256:!MD5:!3DES;
+    ssl_prefer_server_ciphers on;
+    ssl_session_cache shared:SSL:10m;
+    ssl_session_timeout 10m;
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+    error_page 497  https://$host$request_uri;
+    #SSL-END
+
+    # --- Security Enhancement Headers ---
+    add_header X-Frame-Options "DENY" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-XSS-Protection "1; mode=block" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+
+    # --- Upload Size Limit (Max 50MB) ---
+    client_max_body_size 50M;
+
+    # --- Force HTTP to HTTPS Redirect ---
+    if ($scheme = http) {
+        return 301 https://$host$request_uri;
+    }
+
+    # Block access to sensitive files
+    location ~* (\.env.*|\.git|\.htaccess|\.user\.ini|\.DS_Store|README\.md|requirements\.txt|\.py$)
+    {
+        return 404;
+    }
+
+    # --- Health Check Endpoint ---
+    location /health {
+        access_log off;
+        return 200 "OK";
+        add_header Content-Type text/plain;
+    }
+
+    # --- Reverse Proxy to Python Application ---
+    location / {
+        proxy_pass http://127.0.0.1:5000;
+
+        # Proxy header settings
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Host $server_name;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header REMOTE-HOST $remote_addr;
+
+        # WebSocket support (needed for streaming output)
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+
+        # Timeout settings - AI generation takes longer
+        proxy_connect_timeout 180s;
+        proxy_send_timeout 180s;
+        proxy_read_timeout 180s;
+    }
+
+    access_log  /www/wwwlogs/YourSiteName.log;
+    error_log  /www/wwwlogs/YourSiteName.error.log;
+}
+```
+
+> ⚠️ **Important Notes**:
+> - Replace `yourdomain.com` and `YourSiteName` with your actual domain and site name
+> - SSL certificate paths should match what BT Panel actually generates
+> - Timeout should be set to 180 seconds or more, as AI image generation requires longer processing time
+
+### Step 8: Final Verification
+
+1. Visit `https://yourdomain.com` in your browser
+2. Confirm HTTPS certificate is working (lock icon 🔒 in address bar)
+3. Login with `admin` + your admin password
+4. Try generating an image to confirm all features work
+
+🎉 **Congratulations! You've successfully deployed the AI image generation website using BT Panel!**
 
 ### Other Deployment Methods
 
-Besides 1Panel, you can also deploy using:
+Besides BT Panel, you can also deploy using:
 
-- **Gunicorn + Nginx**: Suitable for users with Linux server admin experience
+- **Gunicorn + Nginx Manual Setup**: Suitable for users with Linux server admin experience
 - **Docker / Docker Compose**: Suitable for users familiar with containerization
-- **BT Panel**: Similar to 1Panel
+- **1Panel**: Another open-source server management panel with similar functionality
 
 > 💡 For detailed tutorials on other deployment methods, ask an AI assistant or search for resources.
 
@@ -434,6 +674,8 @@ gemini-image-webapp/
 │   ├── css/                  # Style files
 │   ├── js/                   # JavaScript scripts
 │   ├── fonts/                # Font files
+│   ├── lib/                  # Third-party libraries (e.g. date picker)
+│   ├── logo.ico              # Website icon
 │   ├── images/               # Generated images (auto-created)
 │   └── thumbnails/           # Thumbnails (auto-created)
 │
@@ -459,10 +701,18 @@ gemini-image-webapp/
 - QQ Mail requires enabling SMTP service first
 
 ### Q: How to use a proxy to access Gemini API?
-**A:** Configure in `.env`:
+**A:**
+
+**Local development**: Configure in `.env` file:
 ```env
 GEMINI_API_BASE_URL=http://your_proxy_address:port
 ```
+
+**Server deployment (BT Panel)**: In BT Panel's Python project settings, find "Environment Variables" and add:
+```env
+GEMINI_API_BASE_URL=http://your_proxy_address:port
+```
+You need to **restart the project** after adding for it to take effect.
 
 > ⚠️ **Important: This project uses Gemini official API protocol**
 > 
@@ -482,7 +732,9 @@ GEMINI_API_BASE_URL=http://your_proxy_address:port
 **A:** Current version requires modifying source code. Comment out the verification code validation logic in the `api_register` function in `app.py`.
 
 ### Q: Forgot admin password?
-**A:** Delete the `data/users.db` file, restart the application and a new admin account will be created automatically.
+**A:** The admin password is set via the `ADMIN_PASSWORD` environment variable:
+- **Local development**: Modify the `ADMIN_PASSWORD` value in your `.env` file, then restart the application
+- **Server deployment (BT Panel)**: In BT Panel's Python project settings, modify the `ADMIN_PASSWORD` environment variable value, then restart the project
 
 ---
 
