@@ -23,15 +23,13 @@ def get_db_connection():
     """获取数据库连接"""
     conn = sqlite3.connect(DATABASE_FILE)
     conn.row_factory = sqlite3.Row  # 返回字典形式的结果
-    conn.execute("PRAGMA journal_mode=WAL")  # 启用 WAL 模式提升并发性能
     return conn
 
 
 @contextmanager
 def get_db():
     """数据库连接上下文管理器，自动处理 commit/rollback/close"""
-    conn = sqlite3.connect(DATABASE_FILE)
-    conn.row_factory = sqlite3.Row
+    conn = get_db_connection()
     try:
         yield conn
         conn.commit()
@@ -46,6 +44,8 @@ def init_db():
     """初始化数据库，创建用户表"""
     os.makedirs("data", exist_ok=True)
     with get_db() as conn:
+        # 启用 WAL 模式提升并发性能（数据库级别持久设置，只需设置一次）
+        conn.execute("PRAGMA journal_mode=WAL")
         cursor = conn.cursor()
         
         # 检查表是否存在，如果存在检查是否有 is_admin 列
@@ -190,6 +190,10 @@ def create_user(username, password, email=None):
     if len(password) < 6:
         return False, "密码至少需要6个字符", None
     
+    # 密码复杂度校验：必须包含字母和数字
+    if not re.search(r'[a-zA-Z]', password) or not re.search(r'[0-9]', password):
+        return False, "密码必须同时包含字母和数字", None
+    
     # 验证邮箱格式（如果提供）
     if email:
         email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
@@ -224,7 +228,7 @@ def verify_user(username, password):
         user = cursor.fetchone()
     
     if user is None:
-        return False, "用户名不存在", None
+        return False, "用户名或密码错误", None
     
     if check_password_hash(user["password_hash"], password):
         return True, "登录成功", {
@@ -235,7 +239,7 @@ def verify_user(username, password):
             "created_at": user["created_at"]
         }
     else:
-        return False, "密码错误", None
+        return False, "用户名或密码错误", None
 
 
 def get_user_by_id(user_id):

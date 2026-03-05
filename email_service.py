@@ -4,7 +4,7 @@
 """
 
 import smtplib
-import random
+import secrets
 import os
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
@@ -30,7 +30,7 @@ def generate_verification_code(length=6):
     Returns:
         str: 数字验证码
     """
-    return ''.join([str(random.randint(0, 9)) for _ in range(length)])
+    return ''.join([str(secrets.randbelow(10)) for _ in range(length)])
 
 
 def send_verification_email(recipient_email, verification_code):

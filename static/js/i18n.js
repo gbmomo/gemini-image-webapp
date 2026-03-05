@@ -156,6 +156,7 @@ const translations = {
         btn_ok: '确定',
         btn_cancel: '取消',
         delete: '删除',
+        confirm_delete_session: '确定要删除此会话吗？删除后无法恢复。',
 
         // main.js 消息
         upload_limit: '最多只能上传 {0} 张参考图',
@@ -398,6 +399,7 @@ const translations = {
         btn_ok: 'OK',
         btn_cancel: 'Cancel',
         delete: 'Delete',
+        confirm_delete_session: 'Are you sure you want to delete this session? This cannot be undone.',
 
         // main.js messages
         upload_limit: 'Maximum {0} reference images allowed',

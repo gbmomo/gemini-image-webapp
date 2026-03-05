@@ -16,6 +16,7 @@ from datetime import datetime, timedelta
 from functools import wraps
 from PIL import Image
 import io
+from filelock import FileLock
 from flask import Flask, render_template, request, jsonify, send_from_directory, session, redirect, url_for
 from werkzeug.utils import secure_filename
 from google import genai
@@ -27,8 +28,9 @@ from flask_limiter.util import get_remote_address
 from flask_talisman import Talisman
 from flask_compress import Compress
 
-# 配置日志
-logging.basicConfig(level=logging.INFO)
+# 配置日志（根据环境动态设置级别）
+_log_level = logging.DEBUG if os.getenv('FLASK_ENV') != 'production' else logging.INFO
+logging.basicConfig(level=_log_level)
 logger = logging.getLogger(__name__)
 
 # 加载 .env 文件中的环境变量（必须在导入 email_service 之前）
@@ -136,15 +138,11 @@ def inject_version():
 
 # Gemini 客户端（增加超时时间以支持长提示词）
 # 如果配置了自定义 API 端点，则使用自定义端点
-http_options = types.HttpOptions(
-    timeout=300000  # 300秒超时（毫秒）
-)
+_http_kwargs = {"timeout": 300000}  # 300秒超时（毫秒）
 if API_BASE_URL:
-    http_options = types.HttpOptions(
-        timeout=300000,
-        base_url=API_BASE_URL
-    )
+    _http_kwargs["base_url"] = API_BASE_URL
     logger.info(f"使用自定义 API 端点: {API_BASE_URL}")
+http_options = types.HttpOptions(**_http_kwargs)
 
 client = genai.Client(
     api_key=API_KEY,
@@ -225,39 +223,95 @@ def get_user_sessions_file(user_id):
 
 
 
-def load_sessions(user_id):
-    """加载指定用户的会话数据"""
+def _get_session_lock(user_id):
+    """获取用户会话文件的文件锁"""
     sessions_file = get_user_sessions_file(user_id)
-    if os.path.exists(sessions_file):
-        try:
-            with open(sessions_file, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except (json.JSONDecodeError, ValueError) as e:
-            # JSON 文件损坏，备份并返回空数据
-            logger.error(f"会话文件损坏 (user {user_id}): {e}")
-            backup_file = f"{sessions_file}.corrupt.{int(time.time())}"
+    return FileLock(sessions_file + ".lock", timeout=10)
+
+
+def load_sessions(user_id):
+    """加载指定用户的会话数据（带文件锁防止并发问题）"""
+    sessions_file = get_user_sessions_file(user_id)
+    lock = _get_session_lock(user_id)
+    with lock:
+        if os.path.exists(sessions_file):
             try:
-                import shutil
-                shutil.copy2(sessions_file, backup_file)
-                logger.info(f"已备份损坏的会话文件到: {backup_file}")
-            except Exception as backup_error:
-                logger.error(f"备份失败: {backup_error}")
-            # 删除损坏的文件，让系统重新开始
-            try:
-                os.remove(sessions_file)
-            except Exception as remove_error:
-                logger.error(f"删除损坏文件失败: {remove_error}")
-            return {}
+                with open(sessions_file, "r", encoding="utf-8") as f:
+                    return json.load(f)
+            except (json.JSONDecodeError, ValueError) as e:
+                # JSON 文件损坏，备份并返回空数据
+                logger.error(f"会话文件损坏 (user {user_id}): {e}")
+                backup_file = f"{sessions_file}.corrupt.{int(time.time())}"
+                try:
+                    import shutil
+                    shutil.copy2(sessions_file, backup_file)
+                    logger.info(f"已备份损坏的会话文件到: {backup_file}")
+                except Exception as backup_error:
+                    logger.error(f"备份失败: {backup_error}")
+                # 删除损坏的文件，让系统重新开始
+                try:
+                    os.remove(sessions_file)
+                except Exception as remove_error:
+                    logger.error(f"删除损坏文件失败: {remove_error}")
+                return {}
     return {}
 
 
 def save_sessions(user_id, sessions):
-    """保存指定用户的会话数据（原子写入，防止文件损坏）"""
+    """保存指定用户的会话数据（原子写入 + 文件锁，防止并发和文件损坏）"""
     sessions_file = get_user_sessions_file(user_id)
-    tmp_file = sessions_file + ".tmp"
-    with open(tmp_file, "w", encoding="utf-8") as f:
-        json.dump(sessions, f, ensure_ascii=False, indent=2)
-    os.replace(tmp_file, sessions_file)
+    lock = _get_session_lock(user_id)
+    with lock:
+        tmp_file = sessions_file + ".tmp"
+        with open(tmp_file, "w", encoding="utf-8") as f:
+            json.dump(sessions, f, ensure_ascii=False, indent=2)
+        os.replace(tmp_file, sessions_file)
+
+
+def _delete_message_files(msg):
+    """删除消息关联的所有图片文件（生成图片、缩略图、参考图片）"""
+    # 删除生成的图片
+    if msg.get("image"):
+        image_path = os.path.join(IMAGES_DIR, os.path.basename(msg["image"]))
+        if os.path.exists(image_path):
+            try:
+                os.remove(image_path)
+            except Exception as e:
+                logger.warning(f"删除图片失败 {image_path}: {e}")
+    # 删除缩略图
+    if msg.get("thumbnail"):
+        thumb_path = os.path.join(THUMBNAILS_DIR, os.path.basename(msg["thumbnail"]))
+        if os.path.exists(thumb_path):
+            try:
+                os.remove(thumb_path)
+            except Exception as e:
+                logger.warning(f"删除缩略图失败 {thumb_path}: {e}")
+    # 删除参考图片
+    if msg.get("reference_images"):
+        for ref_img in msg["reference_images"]:
+            ref_path = os.path.join(IMAGES_DIR, os.path.basename(ref_img))
+            if os.path.exists(ref_path):
+                try:
+                    os.remove(ref_path)
+                except Exception as e:
+                    logger.warning(f"删除参考图片失败 {ref_path}: {e}")
+
+
+def _get_json_data():
+    """安全获取请求 JSON 数据，如果不是有效 JSON 返回 None"""
+    try:
+        return request.get_json(silent=True) or {}
+    except Exception:
+        return {}
+
+
+def _validate_session_id(session_id):
+    """验证 session_id 是否是合法的 UUID 格式"""
+    try:
+        uuid.UUID(session_id)
+        return True
+    except (ValueError, TypeError, AttributeError):
+        return False
 
 
 def create_thumbnail(image_path, thumbnail_filename, max_size=400, quality=60):
@@ -467,7 +521,7 @@ def login():
 @csrf.exempt  # API端点不需要CSRF（使用JSON）
 def api_login():
     """登录接口"""
-    data = request.json
+    data = _get_json_data()
     username = data.get("username", "")
     password = data.get("password", "")
     
@@ -487,7 +541,7 @@ def api_login():
 @csrf.exempt
 def send_verification_code_route():
     """发送邮箱验证码"""
-    data = request.json
+    data = _get_json_data()
     email = data.get("email", "").strip()
     
     if not email:
@@ -523,7 +577,7 @@ def send_verification_code_route():
 @csrf.exempt
 def api_register():
     """注册接口"""
-    data = request.json
+    data = _get_json_data()
     username = data.get("username", "")
     email = data.get("email", "").strip()
     password = data.get("password", "")
@@ -547,7 +601,8 @@ def api_register():
         return jsonify({"error": message}), 400
 
 
-@app.route("/api/logout")
+@app.route("/api/logout", methods=["GET", "POST"])
+@login_required
 def api_logout():
     """登出接口"""
     session.clear()
@@ -606,6 +661,8 @@ def create_session_route():
 @csrf.exempt
 def get_session_route(session_id):
     """获取单个会话详情"""
+    if not _validate_session_id(session_id):
+        return jsonify({"error": "无效的会话ID"}), 400
     user_id = session["user_id"]
     sessions = load_sessions(user_id)
     if session_id not in sessions:
@@ -633,27 +690,14 @@ def get_session_route(session_id):
 @csrf.exempt
 def delete_session_route(session_id):
     """删除会话"""
+    if not _validate_session_id(session_id):
+        return jsonify({"error": "无效的会话ID"}), 400
     user_id = session["user_id"]
     sessions = load_sessions(user_id)
     if session_id in sessions:
         # 删除相关图片、缩略图和参考图片
         for msg in sessions[session_id].get("messages", []):
-            # 删除生成的图片
-            if msg.get("image"):
-                image_path = os.path.join(IMAGES_DIR, os.path.basename(msg["image"]))
-                if os.path.exists(image_path):
-                    os.remove(image_path)
-            # 删除缩略图
-            if msg.get("thumbnail"):
-                thumb_path = os.path.join(THUMBNAILS_DIR, os.path.basename(msg["thumbnail"]))
-                if os.path.exists(thumb_path):
-                    os.remove(thumb_path)
-            # 删除参考图片
-            if msg.get("reference_images"):
-                for ref_img in msg["reference_images"]:
-                    ref_path = os.path.join(IMAGES_DIR, os.path.basename(ref_img))
-                    if os.path.exists(ref_path):
-                        os.remove(ref_path)
+            _delete_message_files(msg)
         del sessions[session_id]
         save_sessions(user_id, sessions)
         # 清除活跃聊天
@@ -668,11 +712,13 @@ def delete_session_route(session_id):
 @csrf.exempt
 def update_session_title(session_id):
     """更新会话标题"""
+    if not _validate_session_id(session_id):
+        return jsonify({"error": "无效的会话ID"}), 400
     user_id = session["user_id"]
     sessions = load_sessions(user_id)
     if session_id not in sessions:
         return jsonify({"error": "会话不存在"}), 404
-    data = request.json
+    data = _get_json_data()
     sessions[session_id]["title"] = data.get("title", "新对话")
     sessions[session_id]["updated_at"] = datetime.now().isoformat()
     save_sessions(user_id, sessions)
@@ -777,7 +823,7 @@ def _process_gemini_response(response, session_id):
 def generate_image():
     """生成或修改图像"""
     user_id = session["user_id"]
-    data = request.json
+    data = _get_json_data()
 
     # 1. 验证输入参数
     error = _validate_generate_params(data)
@@ -785,6 +831,8 @@ def generate_image():
         return error
 
     session_id = data.get("session_id")
+    if not _validate_session_id(session_id):
+        return jsonify({"error": "无效的会话ID"}), 400
     prompt = data.get("prompt", "")
     aspect_ratio = data.get("aspect_ratio", "auto")
     image_size = data.get("image_size", "2K")
@@ -802,10 +850,14 @@ def generate_image():
         image_size = settings.get("image_size", image_size)
         model = settings.get("model", model)
 
+    # 预初始化变量，确保异常处理块中可以安全访问
+    cost = 0
+    user = None
+
     try:
         # 2. 检查并扣除点数（管理员免消耗）
         user = get_user_by_id(user_id)
-        cost = 0  # 默认值（管理员不消耗点数）
+        credits_after_deduct = user["credits"]  # 记录扣除后的点数
         if not user.get("is_admin"):
             cost_map = {"1K": 1, "2K": 2, "4K": 4}
             cost = cost_map.get(image_size, 2)
@@ -813,7 +865,7 @@ def generate_image():
             if user["credits"] < cost:
                 return jsonify({"error": f"点数不足，本次生成需要 {cost} 点，剩余 {user['credits']} 点。请联系管理员充值。"}), 403
 
-            update_user_credits(user_id, -cost)
+            _, _, credits_after_deduct = update_user_credits(user_id, -cost)
 
         # 3. 获取或创建聊天实例
         chat = get_or_create_chat(session_id, aspect_ratio, image_size, model, user_id)
@@ -869,13 +921,13 @@ def generate_image():
             "thumbnail": result["thumbnail"],
             "session_title": sessions[session_id]["title"],
             "settings": sessions[session_id].get("settings"),
-            "credits_remaining": user["credits"] - cost if not user.get("is_admin") else "admin"
+            "credits_remaining": credits_after_deduct if not user.get("is_admin") else "admin"
         })
 
     except genai_errors.ServerError as e:
         logger.error(f"Image generation server error for user {user_id}: {str(e)}", exc_info=True)
         # 退还已扣除的点数
-        if cost > 0 and not user.get("is_admin"):
+        if cost > 0 and user and not user.get("is_admin"):
             update_user_credits(user_id, cost)
         error_str = str(e)
 
@@ -891,7 +943,7 @@ def generate_image():
     except genai_errors.ClientError as e:
         logger.warning(f"Image generation client error for user {user_id}: {str(e)}")
         # 退还已扣除的点数
-        if cost > 0 and not user.get("is_admin"):
+        if cost > 0 and user and not user.get("is_admin"):
             update_user_credits(user_id, cost)
         error_str = str(e)
 
@@ -905,7 +957,7 @@ def generate_image():
     except Exception as e:
         logger.error(f"Image generation failed for user {user_id}: {str(e)}", exc_info=True)
         # 退还已扣除的点数
-        if cost > 0 and not user.get("is_admin"):
+        if cost > 0 and user and not user.get("is_admin"):
             update_user_credits(user_id, cost)
 
         if os.getenv('FLASK_DEBUG', 'False').lower() == 'true':
@@ -978,10 +1030,25 @@ def admin_get_users():
 @csrf.exempt
 def admin_delete_user(user_id):
     """删除用户"""
-    # 删除用户会话文件
+    # 删除用户会话中关联的所有图片和缩略图
+    try:
+        user_sessions = load_sessions(user_id)
+        for sid, session_data in user_sessions.items():
+            for msg in session_data.get("messages", []):
+                _delete_message_files(msg)
+    except Exception as e:
+        logger.warning(f"清理用户 {user_id} 的图片文件时出错: {e}")
+    
+    # 删除用户会话文件和锁文件
     sessions_file = get_user_sessions_file(user_id)
     if os.path.exists(sessions_file):
         os.remove(sessions_file)
+    lock_file = sessions_file + ".lock"
+    if os.path.exists(lock_file):
+        try:
+            os.remove(lock_file)
+        except Exception:
+            pass
     
     success, message = delete_user(user_id)
     if success:
@@ -1007,7 +1074,7 @@ def admin_toggle_admin(user_id):
 @csrf.exempt
 def admin_add_credits(user_id):
     """管理员给用户充值"""
-    data = request.json
+    data = _get_json_data()
     try:
         amount = int(data.get("amount", 0))
     except (ValueError, TypeError):
@@ -1060,15 +1127,13 @@ def admin_get_session_detail(user_id, session_id):
 @csrf.exempt
 def admin_cleanup_data():
     """清理历史数据"""
-    data = request.json
+    data = _get_json_data()
     cutoff_date_str = data.get("cutoff_date")
     
     if not cutoff_date_str:
         return jsonify({"error": "请提供截止日期"}), 400
         
     try:
-        # 解析 ISO 格式日期 (YYYY-MM-DD)
-        # 如果前端只传 YYYY-MM-DD，我们把它视为当天的 00:00:00，所以比较时要注意
         if len(cutoff_date_str) == 10:
              cutoff_date = datetime.strptime(cutoff_date_str, "%Y-%m-%d")
         else:
@@ -1076,78 +1141,91 @@ def admin_cleanup_data():
     except ValueError:
         return jsonify({"error": "日期格式无效"}), 400
 
+    # 第一步：清理过期消息
+    msg_stats = _cleanup_expired_messages(cutoff_date)
+    
+    # 第二步：清理孤儿图片
+    orphan_stats = _cleanup_orphan_files()
+
+    return jsonify({
+        "success": True,
+        "message": "清理完成",
+        "deleted_stats": {
+            "sessions": msg_stats["sessions"],
+            "messages": msg_stats["messages"],
+            "images": msg_stats["images"] + orphan_stats["images"],
+            "orphan_images": orphan_stats["images"],
+            "orphan_thumbnails": orphan_stats["thumbnails"]
+        }
+    })
+
+
+def _cleanup_expired_messages(cutoff_date):
+    """清理截止日期之前的消息和空会话"""
     deleted_sessions = 0
     deleted_messages = 0
     deleted_images = 0
-    
-    # 遍历所有用户会话文件
-    if os.path.exists(SESSIONS_DIR):
-        for filename in os.listdir(SESSIONS_DIR):
-            if not filename.endswith(".json") or not filename.startswith("user_"):
-                continue
-                
-            filepath = os.path.join(SESSIONS_DIR, filename)
-            try:
+
+    if not os.path.exists(SESSIONS_DIR):
+        return {"sessions": 0, "messages": 0, "images": 0}
+
+    for filename in os.listdir(SESSIONS_DIR):
+        if not filename.endswith(".json") or not filename.startswith("user_"):
+            continue
+
+        # 提取 user_id 用于获取文件锁
+        try:
+            cleanup_user_id = int(filename.replace("user_", "").replace(".json", ""))
+        except (ValueError, TypeError):
+            continue
+
+        filepath = os.path.join(SESSIONS_DIR, filename)
+        lock = _get_session_lock(cleanup_user_id)
+        try:
+            with lock:
+                if not os.path.exists(filepath):
+                    continue
                 with open(filepath, "r", encoding="utf-8") as f:
                     sessions = json.load(f)
-                
+
                 modified = False
                 sessions_to_remove = []
-                
+
                 for sid, session_data in sessions.items():
-                    # 检查整个会话是否过期（如果会话没有任何消息，或者最后更新时间早于截止日期）
-                    # 这里为了更细粒度，我们只清理消息
-                    
                     new_messages = []
                     session_modified = False
-                    
+
                     for msg in session_data.get("messages", []):
                         msg_time_str = msg.get("timestamp")
                         should_delete = False
-                        
+
                         if msg_time_str:
                             try:
                                 msg_time = datetime.fromisoformat(msg_time_str)
                                 if msg_time < cutoff_date:
                                     should_delete = True
                             except ValueError:
-                                pass # 无法解析时间，保留
-                        
+                                pass
+
                         if should_delete:
                             deleted_messages += 1
                             session_modified = True
-                            # 删除关联图片和缩略图
+                            # 统计图片数
                             if msg.get("image"):
-                                image_basename = os.path.basename(msg["image"])
-                                image_path = os.path.join(IMAGES_DIR, image_basename)
-                                if os.path.exists(image_path):
-                                    os.remove(image_path)
-                                    deleted_images += 1
-                                # 删除对应缩略图
-                                if msg.get("thumbnail"):
-                                    thumb_basename = os.path.basename(msg["thumbnail"])
-                                    thumb_path = os.path.join(THUMBNAILS_DIR, thumb_basename)
-                                    if os.path.exists(thumb_path):
-                                        os.remove(thumb_path)
-                            
-                            # 删除参考图片
+                                deleted_images += 1
                             if msg.get("reference_images"):
-                                for ref_img in msg["reference_images"]:
-                                    ref_path = os.path.join(IMAGES_DIR, os.path.basename(ref_img))
-                                    if os.path.exists(ref_path):
-                                        os.remove(ref_path)
-                                        deleted_images += 1
+                                deleted_images += len(msg["reference_images"])
+                            # 删除关联文件
+                            _delete_message_files(msg)
                         else:
                             new_messages.append(msg)
-                    
+
                     if session_modified:
                         session_data["messages"] = new_messages
                         modified = True
-                        
-                    # 如果会话变空了，且创建时间也很老，则删除整个会话
-                    # 或者如果会话本来有消息现在没了，也删掉
+
+                    # 如果会话变空了，则删除整个会话
                     if not session_data["messages"]:
-                        # 再次检查会话本身的更新时间，以防万一
                         updated_at_str = session_data.get("updated_at")
                         if updated_at_str:
                             try:
@@ -1163,17 +1241,23 @@ def admin_cleanup_data():
                     del sessions[sid]
                     deleted_sessions += 1
                     modified = True
-                
+
                 if modified:
-                    with open(filepath, "w", encoding="utf-8") as f:
+                    # 使用原子写入，与 save_sessions 保持一致
+                    tmp_file = filepath + ".tmp"
+                    with open(tmp_file, "w", encoding="utf-8") as f:
                         json.dump(sessions, f, ensure_ascii=False, indent=2)
+                    os.replace(tmp_file, filepath)
 
-            except Exception as e:
-                logger.error(f"Error processing {filename}: {e}")
-                continue
+        except Exception as e:
+            logger.error(f"Error processing {filename}: {e}")
+            continue
 
-    # === 第二步：清理孤儿图片（不在任何会话中引用的图片） ===
-    # 重新收集所有会话中引用的图片（清理后的状态）
+    return {"sessions": deleted_sessions, "messages": deleted_messages, "images": deleted_images}
+
+
+def _cleanup_orphan_files():
+    """清理不在任何会话中引用的孤儿图片和缩略图"""
     referenced_images = set()
     referenced_thumbnails = set()
     
@@ -1203,7 +1287,6 @@ def admin_cleanup_data():
     orphan_images = 0
     orphan_thumbnails = 0
     
-    # 清理未被引用的图片
     if os.path.exists(IMAGES_DIR):
         for filename in os.listdir(IMAGES_DIR):
             if filename not in referenced_images:
@@ -1215,7 +1298,6 @@ def admin_cleanup_data():
                     except Exception as e:
                         logger.error(f"Error deleting orphan image {filename}: {e}")
     
-    # 清理未被引用的缩略图
     if os.path.exists(THUMBNAILS_DIR):
         for filename in os.listdir(THUMBNAILS_DIR):
             if filename not in referenced_thumbnails:
@@ -1227,17 +1309,7 @@ def admin_cleanup_data():
                     except Exception as e:
                         logger.error(f"Error deleting orphan thumbnail {filename}: {e}")
 
-    return jsonify({
-        "success": True,
-        "message": f"清理完成",
-        "deleted_stats": {
-            "sessions": deleted_sessions,
-            "messages": deleted_messages,
-            "images": deleted_images + orphan_images,
-            "orphan_images": orphan_images,
-            "orphan_thumbnails": orphan_thumbnails
-        }
-    })
+    return {"images": orphan_images, "thumbnails": orphan_thumbnails}
 
 
 @app.route("/api/admin/card-keys", methods=["GET"])
@@ -1254,7 +1326,7 @@ def admin_get_card_keys():
 @csrf.exempt
 def admin_generate_card_keys():
     """管理员生成卡密"""
-    data = request.json
+    data = _get_json_data()
     try:
         credits = int(data.get("credits", 0))
         count = int(data.get("count", 0))
@@ -1274,7 +1346,7 @@ def admin_generate_card_keys():
 def redeem_card_key():
     """用户使用卡密充值"""
     user_id = session["user_id"]
-    data = request.json
+    data = _get_json_data()
     code = data.get("code", "")
     
     success, message, new_credits = use_card_key(code, user_id)

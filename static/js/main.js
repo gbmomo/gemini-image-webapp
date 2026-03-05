@@ -15,8 +15,18 @@ const state = {
     isLoadingSession: false   // 会话历史加载中
 };
 
-// 会话数据缓存（避免重复加载）
+// 会话数据缓存（避免重复加载，LRU 策略限制最多 50 个）
 const sessionCache = new Map();
+const SESSION_CACHE_MAX = 50;
+
+function sessionCacheSet(key, value) {
+    if (sessionCache.size >= SESSION_CACHE_MAX) {
+        // 删除最早的缓存项（Map 保持插入顺序）
+        const firstKey = sessionCache.keys().next().value;
+        sessionCache.delete(firstKey);
+    }
+    sessionCache.set(key, value);
+}
 
 // DOM 元素
 const elements = {
@@ -170,6 +180,12 @@ function renderSessionList() {
         btn.addEventListener('click', async (e) => {
             e.stopPropagation();
             const sessionId = btn.dataset.id;
+            const confirmed = await Modal.confirm(
+                I18n.t('delete'),
+                I18n.t('confirm_delete_session'),
+                'warning'
+            );
+            if (!confirmed) return;
             await deleteSession(sessionId);
             sessionCache.delete(sessionId);
             state.sessions = state.sessions.filter(s => s.id !== sessionId);
@@ -206,8 +222,9 @@ function renderMessages(messages) {
         // Generated Image (Assistant only usually)
         // Use thumbnail for preview if available, original for modal view
         if (msg.image) {
-            const previewSrc = msg.thumbnail || msg.image;
-            contentHtml += `<img class="chat-image" src="${previewSrc}" alt="${I18n.t('generated_image')}" data-src="${msg.image}" loading="lazy">`;
+            const previewSrc = escapeHtml(msg.thumbnail || msg.image);
+            const originalSrc = escapeHtml(msg.image);
+            contentHtml += `<img class="chat-image" src="${previewSrc}" alt="${I18n.t('generated_image')}" data-src="${originalSrc}" loading="lazy">`;
             contentHtml += `<div class="chat-image-hint">${I18n.t('click_to_view')}</div>`;
         }
 
@@ -216,13 +233,13 @@ function renderMessages(messages) {
         if (msg.reference_images && msg.reference_images.length > 0) {
             refImagesHtml += '<div class="chat-ref-images">';
             for (const refImg of msg.reference_images) {
-                refImagesHtml += `<img class="chat-ref-image" src="/static/images/${refImg}" alt="${I18n.t('reference_image')}" loading="lazy">`;
+                refImagesHtml += `<img class="chat-ref-image" src="/static/images/${escapeHtml(refImg)}" alt="${I18n.t('reference_image')}" loading="lazy">`;
             }
             refImagesHtml += '</div>';
         }
         // Compatibility for old single image
         if (msg.reference_image) {
-            refImagesHtml += `<div class="chat-ref-images"><img class="chat-ref-image" src="/static/images/${msg.reference_image}" alt="${I18n.t('reference_image')}" loading="lazy"></div>`;
+            refImagesHtml += `<div class="chat-ref-images"><img class="chat-ref-image" src="/static/images/${escapeHtml(msg.reference_image)}" alt="${I18n.t('reference_image')}" loading="lazy"></div>`;
         }
 
         return `
@@ -342,7 +359,7 @@ async function selectSession(sessionId) {
         hideSessionLoadingBar();
 
         if (session) {
-            sessionCache.set(sessionId, session);
+            sessionCacheSet(sessionId, session);
             renderMessages(session.messages);
 
             if (session.settings) {
@@ -466,15 +483,9 @@ async function handleGenerate() {
         state.selectedModel = currentModel;
 
         // 更新UI按钮状态
-        elements.resolutionButtons.querySelectorAll('.option-btn').forEach(btn => {
-            btn.classList.toggle('active', btn.dataset.value === currentResolution);
-        });
-        elements.aspectRatioButtons.querySelectorAll('.option-btn').forEach(btn => {
-            btn.classList.toggle('active', btn.dataset.value === currentAspectRatio);
-        });
-        elements.modelButtons.querySelectorAll('.option-btn').forEach(btn => {
-            btn.classList.toggle('active', btn.dataset.value === currentModel);
-        });
+        setActiveOption(elements.resolutionButtons, currentResolution);
+        setActiveOption(elements.aspectRatioButtons, currentAspectRatio);
+        setActiveOption(elements.modelButtons, currentModel);
     }
 
     showLoading(true);
@@ -512,7 +523,7 @@ async function handleGenerate() {
         let cached = sessionCache.get(state.currentSessionId);
         if (!cached) {
             cached = { messages: [], settings: null };
-            sessionCache.set(state.currentSessionId, cached);
+            sessionCacheSet(state.currentSessionId, cached);
         }
 
         // 追加用户消息
@@ -576,91 +587,66 @@ function setupOptionButtons(container, stateKey) {
 // 设置锁定功能
 // ========================================
 
-function lockSettings() {
-    state.isSettingsLocked = true;
+function setSettingsLocked(locked) {
+    state.isSettingsLocked = locked;
+    const method = locked ? 'add' : 'remove';
 
-    // 添加锁定样式
-    elements.resolutionButtons.classList.add('settings-locked');
-    elements.aspectRatioButtons.classList.add('settings-locked');
-    elements.modelButtons.classList.add('settings-locked');
+    elements.resolutionButtons.classList[method]('settings-locked');
+    elements.aspectRatioButtons.classList[method]('settings-locked');
+    elements.modelButtons.classList[method]('settings-locked');
 
-    // 禁用所有按钮
     elements.resolutionButtons.querySelectorAll('.option-btn').forEach(btn => {
-        btn.classList.add('locked');
+        btn.classList[method]('locked');
     });
     elements.aspectRatioButtons.querySelectorAll('.option-btn').forEach(btn => {
-        btn.classList.add('locked');
+        btn.classList[method]('locked');
     });
     elements.modelButtons.querySelectorAll('.option-btn').forEach(btn => {
-        btn.classList.add('locked');
+        btn.classList[method]('locked');
     });
 }
 
+function lockSettings() {
+    setSettingsLocked(true);
+}
+
 function unlockSettings() {
-    state.isSettingsLocked = false;
-
-    // 移除锁定样式
-    elements.resolutionButtons.classList.remove('settings-locked');
-    elements.aspectRatioButtons.classList.remove('settings-locked');
-    elements.modelButtons.classList.remove('settings-locked');
-
-    // 启用所有按钮
-    elements.resolutionButtons.querySelectorAll('.option-btn').forEach(btn => {
-        btn.classList.remove('locked');
-    });
-    elements.aspectRatioButtons.querySelectorAll('.option-btn').forEach(btn => {
-        btn.classList.remove('locked');
-    });
-    elements.modelButtons.querySelectorAll('.option-btn').forEach(btn => {
-        btn.classList.remove('locked');
-    });
+    setSettingsLocked(false);
 }
 
 function applyLockedSettings(settings) {
     // 应用锁定的分辨率
     if (settings.image_size) {
         state.selectedResolution = settings.image_size;
-        elements.resolutionButtons.querySelectorAll('.option-btn').forEach(btn => {
-            btn.classList.toggle('active', btn.dataset.value === settings.image_size);
-        });
+        setActiveOption(elements.resolutionButtons, settings.image_size);
     }
 
     // 应用锁定的纵横比
     if (settings.aspect_ratio) {
         state.selectedAspectRatio = settings.aspect_ratio;
-        elements.aspectRatioButtons.querySelectorAll('.option-btn').forEach(btn => {
-            btn.classList.toggle('active', btn.dataset.value === settings.aspect_ratio);
-        });
+        setActiveOption(elements.aspectRatioButtons, settings.aspect_ratio);
     }
 
     // 应用锁定的模型
     if (settings.model) {
         state.selectedModel = settings.model;
-        elements.modelButtons.querySelectorAll('.option-btn').forEach(btn => {
-            btn.classList.toggle('active', btn.dataset.value === settings.model);
-        });
+        setActiveOption(elements.modelButtons, settings.model);
     }
 }
 
 function resetSettingsToDefault() {
     // 重置分辨率为 1K
     state.selectedResolution = '1K';
-    elements.resolutionButtons.querySelectorAll('.option-btn').forEach(btn => {
-        btn.classList.toggle('active', btn.dataset.value === '1K');
-    });
+    setActiveOption(elements.resolutionButtons, '1K');
 
     // 重置纵横比为 auto
     state.selectedAspectRatio = 'auto';
-    elements.aspectRatioButtons.querySelectorAll('.option-btn').forEach(btn => {
-        btn.classList.toggle('active', btn.dataset.value === 'auto');
-    });
+    setActiveOption(elements.aspectRatioButtons, 'auto');
 
     // 重置模型为默认值
     const defaultModel = window.DEFAULT_MODEL || 'gemini-3-pro-image-preview';
     state.selectedModel = defaultModel;
-    elements.modelButtons.querySelectorAll('.option-btn').forEach(btn => {
-        btn.classList.toggle('active', btn.dataset.value === defaultModel);
-    });
+    setActiveOption(elements.modelButtons, defaultModel);
 }
 
 async function showSettingsLockedModal() {
@@ -684,6 +670,12 @@ function escapeHtml(text) {
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
+}
+
+function setActiveOption(container, value) {
+    container.querySelectorAll('.option-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.value === value);
+    });
 }
 
 // ========================================
@@ -804,9 +796,7 @@ async function init() {
     bindEvents();
 
     // 初始化模型按钮选中状态（根据后端传入的默认模型）
-    elements.modelButtons.querySelectorAll('.option-btn').forEach(btn => {
-        btn.classList.toggle('active', btn.dataset.value === state.selectedModel);
-    });
+    setActiveOption(elements.modelButtons, state.selectedModel);
 
     await loadSessions();
 
