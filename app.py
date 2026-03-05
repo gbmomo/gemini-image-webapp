@@ -993,7 +993,7 @@ def admin_get_user_sessions(user_id):
                     "title": data.get("title", "新对话"),
                     "created_at": data.get("created_at"),
                     "updated_at": data.get("updated_at"),
-                    "messages": data.get("messages", [])
+                    "messages": [{k: v for k, v in msg.items() if k != "thought_signature"} for msg in data.get("messages", [])]
                 })
             session_list.sort(key=lambda x: x.get("updated_at", ""), reverse=True)
             return jsonify(session_list)
