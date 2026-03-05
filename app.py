@@ -397,7 +397,14 @@ def rebuild_chat_history(user_id, session_id):
         elif role == "assistant":
             # 添加文本
             if msg.get("content"):
-                parts.append(types.Part(text=msg["content"]))
+                text_part = types.Part(text=msg["content"])
+                # 附加文本部分的 thought_signature（Gemini API 多轮对话必需）
+                if msg.get("text_thought_signature"):
+                    signature = msg["text_thought_signature"]
+                    if isinstance(signature, str):
+                        signature = base64.b64decode(signature)
+                    text_part.thought_signature = signature
+                parts.append(text_part)
             
             # 添加生成的图片
             if msg.get("image"):
@@ -415,7 +422,7 @@ def rebuild_chat_history(user_id, session_id):
                             data=image_data, mime_type=mime_type
                         )
 
-                        # 附加 thought_signature（Gemini API 多轮对话必需）
+                        # 附加图片部分的 thought_signature（Gemini API 多轮对话必需）
                         if msg.get("thought_signature"):
                             signature = msg["thought_signature"]
                             if isinstance(signature, str):
@@ -672,7 +679,7 @@ def get_session_route(session_id):
     # 过滤掉 thought_signature，前端不需要，避免传输大量数据
     filtered_messages = []
     for msg in session_data.get("messages", []):
-        filtered_msg = {k: v for k, v in msg.items() if k != "thought_signature"}
+        filtered_msg = {k: v for k, v in msg.items() if k not in ("thought_signature", "text_thought_signature")}
         filtered_messages.append(filtered_msg)
 
     return jsonify({
@@ -787,10 +794,17 @@ def _process_gemini_response(response, session_id):
     result_image = None
     result_thumbnail = None
     image_thought_signature = None
+    text_thought_signature = None
 
     for part in response.parts:
         if part.text is not None:
             result_text += part.text
+            # 提取文本部分的 thought_signature
+            if hasattr(part, 'thought_signature') and part.thought_signature:
+                if isinstance(part.thought_signature, bytes):
+                    text_thought_signature = base64.b64encode(part.thought_signature).decode('utf-8')
+                else:
+                    text_thought_signature = part.thought_signature
         elif part.inline_data is not None and result_image is None:
             image_filename = f"{session_id}_{datetime.now().strftime('%Y%m%d%H%M%S%f')}.png"
             image_path = os.path.join(IMAGES_DIR, image_filename)
@@ -812,7 +826,8 @@ def _process_gemini_response(response, session_id):
         "text": result_text,
         "image": result_image,
         "thumbnail": result_thumbnail,
-        "thought_signature": image_thought_signature
+        "thought_signature": image_thought_signature,
+        "text_thought_signature": text_thought_signature
     }
 
 
@@ -900,6 +915,7 @@ def generate_image():
             "image": result["image"],
             "thumbnail": result["thumbnail"] if result["image"] else None,
             "thought_signature": result["thought_signature"],
+            "text_thought_signature": result["text_thought_signature"],
             "timestamp": now
         })
 
@@ -1117,7 +1133,7 @@ def admin_get_session_detail(user_id, session_id):
         return jsonify({
             "id": session_id,
             "title": data.get("title", "新对话"),
-            "messages": [{k: v for k, v in msg.items() if k != "thought_signature"} for msg in data.get("messages", [])]
+            "messages": [{k: v for k, v in msg.items() if k not in ("thought_signature", "text_thought_signature")} for msg in data.get("messages", [])]
         })
     return jsonify({"error": "会话不存在"}), 404
 
