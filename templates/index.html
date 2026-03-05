@@ -6,9 +6,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title data-i18n="page_title">码言旗下Nano Banana AI图片生成器</title>
     <link rel="icon" href="/static/logo.ico" type="image/x-icon">
-    <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="stylesheet" href="/static/css/style.css?v={{ v }}">
     <link href="/static/fonts/inter.css" rel="stylesheet">
-    <script src="/static/js/i18n.js"></script>
+    <script src="/static/js/i18n.js?v={{ v }}"></script>
 </head>
 
 <body>
@@ -378,12 +378,12 @@
     </div>
 
     <!-- 引入自定义 Modal 样式 -->
-    <link rel="stylesheet" href="/static/css/modal.css">
+    <link rel="stylesheet" href="/static/css/modal.css?v={{ v }}">
 
     <script>window.DEFAULT_MODEL = '{{ default_model }}';</script>
-    <script src="/static/js/main.js"></script>
+    <script src="/static/js/main.js?v={{ v }}"></script>
     <!-- 引入自定义 Modal 脚本 -->
-    <script src="/static/js/modal.js"></script>
+    <script src="/static/js/modal.js?v={{ v }}"></script>
     <script>
         // 认证相关逻辑
         function switchAuthMode(mode) {

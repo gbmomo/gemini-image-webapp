@@ -6,14 +6,14 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title data-i18n="admin_page_title">管理员控制台 - 码言旗下 Nano Banana</title>
     <link rel="icon" href="/static/logo.ico" type="image/x-icon">
-    <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="stylesheet" href="/static/css/style.css?v={{ v }}">
     <link href="/static/fonts/inter.css" rel="stylesheet">
     <!-- Flatpickr 日期选择器 (本地文件) -->
     <link rel="stylesheet" href="/static/lib/flatpickr/flatpickr.min.css">
     <link rel="stylesheet" href="/static/lib/flatpickr/dark.css">
     <script src="/static/lib/flatpickr/flatpickr.min.js"></script>
     <script src="/static/lib/flatpickr/zh.js"></script>
-    <script src="/static/js/i18n.js"></script>
+    <script src="/static/js/i18n.js?v={{ v }}"></script>
 </head>
 
 <body class="admin-page">
@@ -210,13 +210,14 @@
     </div>
 
     <!-- 引入自定义 Modal 样式 -->
-    <link rel="stylesheet" href="/static/css/modal.css">
+    <link rel="stylesheet" href="/static/css/modal.css?v={{ v }}">
     <!-- 引入自定义 Modal 脚本 -->
-    <script src="/static/js/modal.js"></script>
+    <script src="/static/js/modal.js?v={{ v }}"></script>
 
     <script>
         let users = [];
-        let currentSessions = []; // Store current user sessions
+        let currentSessions = []; // Store current user sessions (list only)
+        let currentViewUserId = null; // Track which user's sessions are being viewed
 
         // 加载用户数据
         async function loadUsers() {
@@ -309,6 +310,7 @@
         async function viewSessions(userId, username) {
             document.getElementById('modalTitle').textContent = `${username} - ${I18n.t('session_detail')}`;
             document.getElementById('sessionModal').hidden = false;
+            currentViewUserId = userId;
 
             // Reset UI
             const sidebarList = document.getElementById('sessionSidebarList');
@@ -346,55 +348,68 @@
                 return `
                 <div class="session-list-item" id="session-item-${session.id}" onclick="selectSession('${session.id}')">
                     <div class="session-list-item-title">${title}</div>
-                    <div class="session-list-item-date">${formatDate(session.updated_at)} · ${session.messages.length} ${I18n.t('messages_count')}</div>
+                    <div class="session-list-item-date">${formatDate(session.updated_at)} · ${session.message_count || 0} ${I18n.t('messages_count')}</div>
                 </div>
             `}).join('');
         }
 
-        function selectSession(sessionId) {
+        async function selectSession(sessionId) {
             // Update active state in sidebar
             document.querySelectorAll('.session-list-item').forEach(el => el.classList.remove('active'));
             const activeItem = document.getElementById(`session-item-${sessionId}`);
             if (activeItem) activeItem.classList.add('active');
 
-            // Render messages
-            const session = currentSessions.find(s => s.id === sessionId);
             const mainContent = document.getElementById('sessionMainContent');
 
-            if (!session || !session.messages || session.messages.length === 0) {
-                mainContent.innerHTML = `
-                    <div class="viewer-empty">
-                        <div class="viewer-empty-icon">💬</div>
-                        <p>${I18n.t('no_messages')}</p>
-                    </div>
-                `;
-                return;
-            }
+            // 从服务器加载单个会话的消息
+            mainContent.innerHTML = `<div class="viewer-empty"><div class="viewer-empty-icon">⏳</div><p>${I18n.t('loading')}</p></div>`;
 
-            mainContent.innerHTML = session.messages.map(msg => `
-                <div class="viewer-message ${msg.role}">
-                    <div class="viewer-avatar">${msg.role === 'user' ? '👤' : '🤖'}</div>
-                    <div class="viewer-content-wrapper">
-                         <div class="viewer-bubble">
-                            ${msg.content || ''}
-                            ${msg.image ? `<img src="${msg.thumbnail || msg.image}" class="viewer-image" alt="${I18n.t('generated_image')}" onclick="openImagePreview('${msg.image}')">` : ''}
+            try {
+                const response = await fetch(`/api/admin/users/${currentViewUserId}/sessions/${sessionId}`);
+                if (!response.ok) {
+                    mainContent.innerHTML = `<div class="viewer-empty"><div class="viewer-empty-icon">❌</div><p>${I18n.t('load_sessions_failed')}</p></div>`;
+                    return;
+                }
+                const session = await response.json();
+
+                if (!session.messages || session.messages.length === 0) {
+                    mainContent.innerHTML = `
+                        <div class="viewer-empty">
+                            <div class="viewer-empty-icon">💬</div>
+                            <p>${I18n.t('no_messages')}</p>
                         </div>
-                         <!-- Reference Images -->
-                         ${msg.reference_images ? `
-                            <div style="margin-top: 5px; display: flex; gap: 5px; flex-wrap: wrap;">
-                                ${msg.reference_images.map(ref => `
-                                    <img src="/static/images/${ref}" style="width: 40px; height: 40px; border-radius: 4px; object-fit: cover; border: 1px solid rgba(255,255,255,0.1);">
-                                `).join('')}
-                            </div>
-                         ` : ''}
-                    </div>
-                </div>
-            `).join('');
+                    `;
+                    return;
+                }
 
-            // Scroll to bottom
-            setTimeout(() => {
-                mainContent.scrollTop = mainContent.scrollHeight;
-            }, 0);
+                mainContent.innerHTML = session.messages.map(msg => `
+                    <div class="viewer-message ${msg.role}">
+                        <div class="viewer-avatar">${msg.role === 'user' ? '👤' : '🤖'}</div>
+                        <div class="viewer-content-wrapper">
+                             <div class="viewer-bubble">
+                                ${msg.content || ''}
+                                ${msg.image ? `<img src="${msg.thumbnail || msg.image}" class="viewer-image" alt="${I18n.t('generated_image')}" onclick="openImagePreview('${msg.image}')">` : ''}
+                            </div>
+                             <!-- Reference Images -->
+                             ${msg.reference_images ? `
+                                <div style="margin-top: 5px; display: flex; gap: 5px; flex-wrap: wrap;">
+                                    ${msg.reference_images.map(ref => `
+                                        <img src="/static/images/${ref}" style="width: 40px; height: 40px; border-radius: 4px; object-fit: cover; border: 1px solid rgba(255,255,255,0.1);">
+                                    `).join('')}
+                                </div>
+                             ` : ''}
+                        </div>
+                    </div>
+                `).join('');
+
+                // Scroll to bottom
+                setTimeout(() => {
+                    mainContent.scrollTop = mainContent.scrollHeight;
+                }, 0);
+
+            } catch (error) {
+                mainContent.innerHTML = `<div class="viewer-empty"><div class="viewer-empty-icon">❌</div><p>${I18n.t('load_sessions_failed')}</p></div>`;
+            }
         }
 
         function renderEmptyState() {

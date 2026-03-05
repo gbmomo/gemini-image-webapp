@@ -479,6 +479,9 @@ async function handleGenerate() {
 
     showLoading(true);
 
+    // 保存当前参考图片的副本（用于追加到消息中）
+    const currentRefImages = [...state.referenceImages];
+
     try {
         const result = await generateImage(
             state.currentSessionId,
@@ -505,18 +508,38 @@ async function handleGenerate() {
             }
         }
 
-        // 重新加载消息
-        const sessionData = await getSession(state.currentSessionId);
-        if (sessionData) {
-            sessionCache.set(state.currentSessionId, sessionData);
-            renderMessages(sessionData.messages);
-
-            // 检查并应用锁定状态
-            if (sessionData.settings) {
-                applyLockedSettings(sessionData.settings);
-                lockSettings();
-            }
+        // 直接用返回的数据更新缓存和界面（避免额外请求）
+        let cached = sessionCache.get(state.currentSessionId);
+        if (!cached) {
+            cached = { messages: [], settings: null };
+            sessionCache.set(state.currentSessionId, cached);
         }
+
+        // 追加用户消息
+        cached.messages.push({
+            role: 'user',
+            content: prompt,
+            reference_images: currentRefImages.length > 0 ? currentRefImages.map((_, i) =>
+                `ref_${state.currentSessionId}_${cached.messages.length}_${i}.png`
+            ) : null
+        });
+
+        // 追加 AI 响应
+        cached.messages.push({
+            role: 'assistant',
+            content: result.text,
+            image: result.image,
+            thumbnail: result.thumbnail
+        });
+
+        // 更新设置锁定
+        if (result.settings) {
+            cached.settings = result.settings;
+            applyLockedSettings(result.settings);
+            lockSettings();
+        }
+
+        renderMessages(cached.messages);
 
         // 清除输入和参考图
         elements.promptInput.value = '';
