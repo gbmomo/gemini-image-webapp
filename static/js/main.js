@@ -8,16 +8,85 @@ const state = {
     sessions: [],
     referenceImages: [],  // 改为数组，支持多张
     selectedResolution: '1K',
-    selectedAspectRatio: 'auto',
-    selectedModel: window.DEFAULT_MODEL || 'gemini-3.1-flash-image-preview',  // 从后端环境变量读取默认模型
+    selectedAspectRatio: '1:1',
+    selectedModel: window.DEFAULT_MODEL || 'gemini-3.1-flash-image',  // 从后端环境变量读取默认模型
+    models: [],
+    modelConfigAvailable: false,
     isGenerating: false,
     isSettingsLocked: false,  // 会话生成后锁定设置
-    isLoadingSession: false   // 会话历史加载中
+    isLoadingSession: false,  // 会话历史加载中
+    pendingReferenceCount: 0,
+    pendingReferenceBytes: 0,
+    referenceUploadGeneration: 0
 };
+
+// 服务端暂时不可用时仍可渲染可选项；正常情况下价格和能力始终以 /api/models 为准。
+const FALLBACK_MODELS = [
+    { id: 'gemini-3.1-flash-lite-image', name: 'Nano Banana 2 Lite', sizes: [{ id: '1K', credits: 1 }], ratios: ['1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'], max_references: 14 },
+    { id: 'gemini-3.1-flash-image', name: 'Nano Banana 2', sizes: [{ id: '512', credits: 1 }, { id: '1K', credits: 1 }, { id: '2K', credits: 2 }, { id: '4K', credits: 4 }], ratios: ['1:1', '1:4', '1:8', '2:3', '3:2', '3:4', '4:1', '4:3', '4:5', '5:4', '8:1', '9:16', '16:9', '21:9'], max_references: 14 },
+    { id: 'gemini-3-pro-image', name: 'Nano Banana Pro', sizes: [{ id: '1K', credits: 1 }, { id: '2K', credits: 2 }, { id: '4K', credits: 4 }], ratios: ['1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'], max_references: 14 },
+    { id: 'gemini-2.5-flash-image', name: 'Nano Banana', sizes: [{ id: '1K', credits: 1 }], ratios: ['1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'], max_references: 3 }
+];
 
 // 会话数据缓存（避免重复加载，LRU 策略限制最多 50 个）
 const sessionCache = new Map();
 const SESSION_CACHE_MAX = 50;
+const MAX_REFERENCE_FILE_BYTES = 10 * 1024 * 1024;
+const MAX_REFERENCE_TOTAL_BYTES = 35 * 1024 * 1024;
+let imageModalReturnFocus = null;
+
+function apiFetch(url, options = {}) {
+    const requestOptions = { ...options };
+    const method = (requestOptions.method || 'GET').toUpperCase();
+    if (!['GET', 'HEAD', 'OPTIONS', 'TRACE'].includes(method)) {
+        const headers = new Headers(requestOptions.headers || {});
+        const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content;
+        if (csrfToken) headers.set('X-CSRFToken', csrfToken);
+        requestOptions.headers = headers;
+    }
+    return fetch(url, requestOptions);
+}
+
+window.apiFetch = apiFetch;
+
+function handleUnauthorized() {
+    const authOverlay = document.getElementById('authModalOverlay');
+    if (authOverlay) {
+        authOverlay.classList.add('auth-modal-show');
+    } else {
+        window.setTimeout(() => window.location.reload(), 0);
+    }
+}
+
+async function requestJson(url, options = {}, fallbackKey = 'request_failed') {
+    const response = await apiFetch(url, options);
+    const contentType = response.headers.get('content-type') || '';
+    let data = null;
+
+    if (contentType.includes('application/json')) {
+        data = await response.json();
+    } else {
+        const body = await response.text();
+        if (body && response.ok) {
+            throw new Error(I18n.t('invalid_server_response'));
+        }
+    }
+
+    if (!response.ok) {
+        if (response.status === 401) {
+            handleUnauthorized();
+        }
+        const message = data?.error;
+        const translated = message
+            ? I18n.translateError(message, fallbackKey)
+            : `${I18n.t(fallbackKey)} (HTTP ${response.status})`;
+        const error = new Error(translated);
+        error.status = response.status;
+        throw error;
+    }
+
+    return data;
+}
 
 function sessionCacheSet(key, value) {
     if (sessionCache.size >= SESSION_CACHE_MAX) {
@@ -44,9 +113,10 @@ const elements = {
     previewList: document.getElementById('previewList'),
     promptInput: document.getElementById('promptInput'),
     resolutionGroup: document.getElementById('resolutionGroup'),
-    resolutionButtons: document.getElementById('resolutionButtons'),
-    aspectRatioButtons: document.getElementById('aspectRatioButtons'),
-    modelButtons: document.getElementById('modelButtons'),
+    resolutionSelect: document.getElementById('resolutionSelect'),
+    aspectRatioSelect: document.getElementById('aspectRatioSelect'),
+    modelSelect: document.getElementById('modelSelect'),
+    modelConfigStatus: document.getElementById('modelConfigStatus'),
     btnGenerate: document.getElementById('btnGenerate'),
 
     // 预览区域
@@ -69,48 +139,27 @@ const elements = {
 // ========================================
 
 async function fetchSessions() {
-    try {
-        const response = await fetch('/api/sessions');
-        return await response.json();
-    } catch (error) {
-        console.error('获取会话列表失败:', error);
-        return [];
-    }
+    const data = await requestJson('/api/sessions', {}, 'load_sessions_failed');
+    if (!Array.isArray(data)) throw new Error(I18n.t('sessions_format_invalid'));
+    return data;
 }
 
 async function createSession() {
-    try {
-        const response = await fetch('/api/sessions', { method: 'POST' });
-        return await response.json();
-    } catch (error) {
-        console.error('创建会话失败:', error);
-        return null;
-    }
+    return requestJson('/api/sessions', { method: 'POST' }, 'create_session_failed');
 }
 
 async function getSession(sessionId) {
-    try {
-        const response = await fetch(`/api/sessions/${sessionId}`);
-        return await response.json();
-    } catch (error) {
-        console.error('获取会话详情失败:', error);
-        return null;
-    }
+    return requestJson(`/api/sessions/${encodeURIComponent(sessionId)}`, {}, 'session_detail_failed');
 }
 
 async function deleteSession(sessionId) {
-    try {
-        await fetch(`/api/sessions/${sessionId}`, { method: 'DELETE' });
-        return true;
-    } catch (error) {
-        console.error('删除会话失败:', error);
-        return false;
-    }
+    await requestJson(`/api/sessions/${encodeURIComponent(sessionId)}`, { method: 'DELETE' }, 'delete_session_failed');
+    return true;
 }
 
 async function generateImage(sessionId, prompt, aspectRatio, imageSize, referenceImages, model) {
     try {
-        const response = await fetch('/api/generate', {
+        const response = await apiFetch('/api/generate', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -136,9 +185,11 @@ async function generateImage(sessionId, prompt, aspectRatio, imageSize, referenc
         }
 
         if (!response.ok) {
+            if (response.status === 401) {
+                handleUnauthorized();
+            }
             // 如果错误消息是错误代码（以 error_ 开头），则翻译它
-            const errorMsg = data.error || 'generate_failed';
-            const translatedError = errorMsg.startsWith('error_') ? I18n.t(errorMsg) : errorMsg;
+            const translatedError = I18n.translateError(data.error, 'generate_failed');
             throw new Error(translatedError);
         }
 
@@ -147,6 +198,62 @@ async function generateImage(sessionId, prompt, aspectRatio, imageSize, referenc
         console.error('Image generation failed:', error);
         throw error;
     }
+}
+
+async function loadModelCapabilities() {
+    let data;
+    try {
+        const response = await apiFetch('/api/models');
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        data = await response.json();
+        if (!Array.isArray(data.models) || data.models.length === 0) throw new Error(I18n.t('model_config_empty'));
+        state.modelConfigAvailable = true;
+    } catch (error) {
+        console.error('加载服务端模型配置失败，已使用内置选项：', error);
+        data = { models: FALLBACK_MODELS, default: 'gemini-3.1-flash-image' };
+        state.modelConfigAvailable = false;
+    }
+    state.models = data.models;
+    state.selectedModel = state.models.some(model => model.id === state.selectedModel)
+        ? state.selectedModel : data.default;
+    renderModelOptions();
+    refreshCapabilityOptions();
+    elements.btnGenerate.disabled = !state.modelConfigAvailable;
+    elements.btnGenerate.title = state.modelConfigAvailable ? '' : I18n.t('realtime_model_config_unavailable');
+    updateModelConfigStatus();
+}
+
+function updateModelConfigStatus() {
+    if (!elements.modelConfigStatus) return;
+    elements.modelConfigStatus.hidden = state.modelConfigAvailable;
+    elements.modelConfigStatus.textContent = state.modelConfigAvailable
+        ? '' : `${I18n.t('error_service_unavailable')} (/api/models)`;
+}
+
+function currentModel() {
+    return state.models.find(model => model.id === state.selectedModel);
+}
+
+function fillSelect(select, options, selected, label) {
+    select.innerHTML = options.map(option => `<option value="${escapeHtml(option.id)}">${escapeHtml(option.label)}</option>`).join('');
+    select.value = options.some(option => option.id === selected) ? selected : options[0]?.id;
+    return select.value;
+}
+
+function renderModelOptions() {
+    state.selectedModel = fillSelect(elements.modelSelect,
+        state.models.map(model => ({ id: model.id, label: model.name })), state.selectedModel);
+}
+
+function refreshCapabilityOptions() {
+    const model = currentModel();
+    if (!model) return;
+    state.selectedResolution = fillSelect(elements.resolutionSelect,
+        model.sizes.map(size => ({ id: size.id, label: `${size.id} · 🪙 ${size.credits} ${I18n.t('credit_unit')}` })), state.selectedResolution);
+    state.selectedAspectRatio = fillSelect(elements.aspectRatioSelect,
+        model.ratios.map(ratio => ({ id: ratio, label: ratio })), state.selectedAspectRatio);
+    const hint = document.querySelector('[data-i18n="max_images_hint"]');
+    if (hint) hint.textContent = I18n.t('max_images_count', model.max_references);
 }
 
 // ========================================
@@ -186,14 +293,19 @@ function renderSessionList() {
                 'warning'
             );
             if (!confirmed) return;
-            await deleteSession(sessionId);
-            sessionCache.delete(sessionId);
-            state.sessions = state.sessions.filter(s => s.id !== sessionId);
-            if (state.currentSessionId === sessionId) {
-                state.currentSessionId = null;
-                showEmptyState();
+            try {
+                await deleteSession(sessionId);
+                sessionCache.delete(sessionId);
+                state.sessions = state.sessions.filter(s => s.id !== sessionId);
+                if (state.currentSessionId === sessionId) {
+                    state.currentSessionId = null;
+                    showEmptyState();
+                }
+                renderSessionList();
+            } catch (error) {
+                console.error('删除会话失败:', error);
+                Modal.alert(I18n.t('delete'), error.message, 'error');
             }
-            renderSessionList();
         });
     });
 }
@@ -273,17 +385,21 @@ function showEmptyState() {
 function showLoading(show) {
     elements.loadingOverlay.hidden = !show;
     state.isGenerating = show;
-    elements.btnGenerate.disabled = show;
+    elements.btnGenerate.disabled = show || !state.modelConfigAvailable;
 }
 
 function openImageModal(src) {
+    imageModalReturnFocus = document.activeElement;
     elements.modalImage.src = src;
     elements.btnDownload.href = src;
     elements.imageModal.hidden = false;
+    elements.btnCloseModal.focus();
 }
 
 function closeImageModal() {
     elements.imageModal.hidden = true;
+    if (imageModalReturnFocus instanceof HTMLElement) imageModalReturnFocus.focus();
+    imageModalReturnFocus = null;
 }
 
 function showSessionLoadingBar() {
@@ -329,8 +445,15 @@ function hideSessionLoadingBar() {
 // ========================================
 
 async function loadSessions() {
-    state.sessions = await fetchSessions();
-    renderSessionList();
+    try {
+        state.sessions = await fetchSessions();
+        renderSessionList();
+    } catch (error) {
+        console.error('获取会话列表失败:', error);
+        state.sessions = [];
+        renderSessionList();
+        if (error.status !== 401) Modal.toast(error.message, 'error');
+    }
 }
 
 async function selectSession(sessionId) {
@@ -354,11 +477,9 @@ async function selectSession(sessionId) {
         // 缓存未命中，从服务器加载
         showSessionLoadingBar();
 
-        const session = await getSession(sessionId);
-
-        hideSessionLoadingBar();
-
-        if (session) {
+        try {
+            const session = await getSession(sessionId);
+            if (state.currentSessionId !== sessionId) return;
             sessionCacheSet(sessionId, session);
             renderMessages(session.messages);
 
@@ -368,6 +489,11 @@ async function selectSession(sessionId) {
             } else {
                 unlockSettings();
             }
+        } catch (error) {
+            console.error('获取会话详情失败:', error);
+            if (error.status !== 401) Modal.toast(error.message, 'error');
+        } finally {
+            hideSessionLoadingBar();
         }
     }
 
@@ -378,8 +504,9 @@ async function selectSession(sessionId) {
 }
 
 async function handleNewChat() {
-    const session = await createSession();
-    if (session) {
+    if (state.isGenerating || state.isLoadingSession) return null;
+    try {
+        const session = await createSession();
         state.sessions.unshift(session);
         state.currentSessionId = session.id;
         renderSessionList();
@@ -394,6 +521,11 @@ async function handleNewChat() {
         if (window.innerWidth <= 768) {
             closeSidebar();
         }
+        return session;
+    } catch (error) {
+        console.error('创建会话失败:', error);
+        if (error.status !== 401) Modal.alert(I18n.t('new_chat'), error.message, 'error');
+        return null;
     }
 }
 
@@ -401,27 +533,84 @@ async function handleNewChat() {
 // 图片上传
 // ========================================
 
-const MAX_IMAGES = 14;
+function dataUrlByteLength(dataUrl) {
+    const base64 = dataUrl.split(',', 2)[1] || '';
+    return Math.max(0, Math.floor(base64.length * 3 / 4) - (base64.endsWith('==') ? 2 : base64.endsWith('=') ? 1 : 0));
+}
 
-function handleImageUpload(files) {
+function readImageFile(file) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = () => reject(new Error(I18n.t('read_image_failed', file.name)));
+        reader.readAsDataURL(file);
+    });
+}
+
+async function handleImageUpload(files) {
     if (state.isLoadingSession) return;
     if (!files || files.length === 0) return;
 
     const fileArray = Array.from(files);
+    const maxImages = currentModel()?.max_references || 14;
+    const availableSlots = Math.max(0, maxImages - state.referenceImages.length - state.pendingReferenceCount);
+    const existingBytes = state.referenceImages.reduce((total, image) => total + dataUrlByteLength(image), 0)
+        + state.pendingReferenceBytes;
+    const accepted = [];
+    let selectedBytes = existingBytes;
+    let invalidType = false;
+    let tooLarge = false;
+    let totalExceeded = false;
 
+    let countExceeded = availableSlots === 0 && fileArray.length > 0;
     for (const file of fileArray) {
-        if (!file.type.startsWith('image/')) continue;
-        if (state.referenceImages.length >= MAX_IMAGES) {
-            Modal.alert(I18n.t('upload_limit', MAX_IMAGES), I18n.t('upload_limit', MAX_IMAGES), 'warning');
-            break;
+        if (!file || !file.type.startsWith('image/')) {
+            invalidType = true;
+            continue;
         }
+        if (file.size > MAX_REFERENCE_FILE_BYTES) {
+            tooLarge = true;
+            continue;
+        }
+        if (selectedBytes + file.size > MAX_REFERENCE_TOTAL_BYTES) {
+            totalExceeded = true;
+            continue;
+        }
+        if (accepted.length >= availableSlots) {
+            countExceeded = true;
+            continue;
+        }
+        selectedBytes += file.size;
+        accepted.push(file);
+    }
 
-        const reader = new FileReader();
-        reader.onload = (e) => {
-            state.referenceImages.push(e.target.result);
+    if (countExceeded) {
+        Modal.toast(I18n.t('upload_count_exceeded', maxImages), 'warning');
+    } else if (invalidType) {
+        Modal.toast(I18n.t('upload_images_only'), 'warning');
+    } else if (tooLarge) {
+        Modal.toast(I18n.t('upload_single_too_large'), 'warning');
+    } else if (totalExceeded) {
+        Modal.toast(I18n.t('upload_total_too_large'), 'warning');
+    }
+
+    if (accepted.length === 0) return;
+
+    const uploadGeneration = state.referenceUploadGeneration;
+    const queuedBytes = accepted.reduce((total, file) => total + file.size, 0);
+    state.pendingReferenceCount += accepted.length;
+    state.pendingReferenceBytes += queuedBytes;
+    try {
+        const images = await Promise.all(accepted.map(readImageFile));
+        if (uploadGeneration === state.referenceUploadGeneration) {
+            state.referenceImages.push(...images);
             renderPreviewList();
-        };
-        reader.readAsDataURL(file);
+        }
+    } catch (error) {
+        Modal.toast(error.message, 'error');
+    } finally {
+        state.pendingReferenceCount = Math.max(0, state.pendingReferenceCount - accepted.length);
+        state.pendingReferenceBytes = Math.max(0, state.pendingReferenceBytes - queuedBytes);
     }
 }
 
@@ -434,7 +623,9 @@ function renderPreviewList() {
     elements.previewList.innerHTML = state.referenceImages.map((img, index) => `
         <div class="preview-item">
             <img src="${img}" alt="${I18n.t('reference_image')} ${index + 1}">
-            <button class="btn-remove" data-index="${index}">✕</button>
+            <button class="btn-remove" data-index="${index}" aria-label="${I18n.t('remove_image')}">
+                ✕
+            </button>
         </div>
     `).join('');
 
@@ -448,6 +639,7 @@ function renderPreviewList() {
 }
 
 function clearReferenceImages() {
+    state.referenceUploadGeneration++;
     state.referenceImages = [];
     elements.referenceImage.value = '';
     renderPreviewList();
@@ -458,13 +650,33 @@ function clearReferenceImages() {
 // ========================================
 
 async function handleGenerate() {
-    if (state.isLoadingSession) return;
+    if (state.isGenerating || state.isLoadingSession) return;
+
+    if (!state.modelConfigAvailable) {
+        Modal.alert(I18n.t('generate_failed'), I18n.t('realtime_model_config_unavailable'), 'error');
+        return;
+    }
 
     const prompt = elements.promptInput.value.trim();
+    const model = currentModel();
 
     if (!prompt) {
         Modal.alert(I18n.t('enter_prompt'), I18n.t('enter_prompt'), 'warning');
         elements.promptInput.focus();
+        return;
+    }
+
+    if (!model) {
+        Modal.alert(I18n.t('generate_failed'), I18n.t('current_model_unavailable'), 'error');
+        return;
+    }
+
+    if (state.referenceImages.length > model.max_references) {
+        Modal.alert(
+            I18n.t('reference_limit_title', model.max_references),
+            I18n.t('reference_limit_message', model.name, model.max_references),
+            'warning'
+        );
         return;
     }
 
@@ -475,23 +687,19 @@ async function handleGenerate() {
         const currentAspectRatio = state.selectedAspectRatio;
         const currentModel = state.selectedModel;
 
-        await handleNewChat();
+        const createdSession = await handleNewChat();
+        if (!createdSession) return;
 
         // 恢复用户的设置（handleNewChat会重置为默认值）
         state.selectedResolution = currentResolution;
         state.selectedAspectRatio = currentAspectRatio;
         state.selectedModel = currentModel;
 
-        // 更新UI按钮状态
-        setActiveOption(elements.resolutionButtons, currentResolution);
-        setActiveOption(elements.aspectRatioButtons, currentAspectRatio);
-        setActiveOption(elements.modelButtons, currentModel);
+        renderModelOptions();
+        refreshCapabilityOptions();
     }
 
     showLoading(true);
-
-    // 保存当前参考图片的副本（用于追加到消息中）
-    const currentRefImages = [...state.referenceImages];
 
     try {
         const result = await generateImage(
@@ -507,7 +715,7 @@ async function handleGenerate() {
         const session = state.sessions.find(s => s.id === state.currentSessionId);
         if (session && result.session_title) {
             session.title = result.session_title;
-            session.message_count += 2;
+            session.message_count = (session.message_count || 0) + 2;
             renderSessionList();
         }
 
@@ -515,7 +723,7 @@ async function handleGenerate() {
         if (result.credits_remaining !== undefined && result.credits_remaining !== 'admin') {
             const creditEl = document.getElementById('userCredits');
             if (creditEl) {
-                creditEl.textContent = `🪙 ${result.credits_remaining} 点`;
+                creditEl.innerHTML = `🪙 ${result.credits_remaining} <span data-i18n="credits_label">${I18n.t('credits_label')}</span>`;
             }
         }
 
@@ -530,9 +738,8 @@ async function handleGenerate() {
         cached.messages.push({
             role: 'user',
             content: prompt,
-            reference_images: currentRefImages.length > 0 ? currentRefImages.map((_, i) =>
-                `ref_${state.currentSessionId}_${cached.messages.length}_${i}.png`
-            ) : null
+            reference_images: Array.isArray(result.reference_images) && result.reference_images.length > 0
+                ? result.reference_images : null
         });
 
         // 追加 AI 响应
@@ -567,22 +774,6 @@ async function handleGenerate() {
 // 选项按钮
 // ========================================
 
-function setupOptionButtons(container, stateKey) {
-    container.querySelectorAll('.option-btn').forEach(btn => {
-        btn.addEventListener('click', () => {
-            // 如果设置已锁定，显示提示弹窗
-            if (state.isSettingsLocked) {
-                showSettingsLockedModal();
-                return;
-            }
-
-            container.querySelectorAll('.option-btn').forEach(b => b.classList.remove('active'));
-            btn.classList.add('active');
-            state[stateKey] = btn.dataset.value;
-        });
-    });
-}
-
 // ========================================
 // 设置锁定功能
 // ========================================
@@ -591,18 +782,9 @@ function setSettingsLocked(locked) {
     state.isSettingsLocked = locked;
     const method = locked ? 'add' : 'remove';
 
-    elements.resolutionButtons.classList[method]('settings-locked');
-    elements.aspectRatioButtons.classList[method]('settings-locked');
-    elements.modelButtons.classList[method]('settings-locked');
-
-    elements.resolutionButtons.querySelectorAll('.option-btn').forEach(btn => {
-        btn.classList[method]('locked');
-    });
-    elements.aspectRatioButtons.querySelectorAll('.option-btn').forEach(btn => {
-        btn.classList[method]('locked');
-    });
-    elements.modelButtons.querySelectorAll('.option-btn').forEach(btn => {
-        btn.classList[method]('locked');
+    [elements.resolutionSelect, elements.aspectRatioSelect, elements.modelSelect].forEach(select => {
+        select.disabled = locked;
+        select.classList[method]('settings-locked');
     });
 }
 
@@ -618,35 +800,33 @@ function applyLockedSettings(settings) {
     // 应用锁定的分辨率
     if (settings.image_size) {
         state.selectedResolution = settings.image_size;
-        setActiveOption(elements.resolutionButtons, settings.image_size);
     }
 
     // 应用锁定的纵横比
     if (settings.aspect_ratio) {
         state.selectedAspectRatio = settings.aspect_ratio;
-        setActiveOption(elements.aspectRatioButtons, settings.aspect_ratio);
     }
 
     // 应用锁定的模型
     if (settings.model) {
         state.selectedModel = settings.model;
-        setActiveOption(elements.modelButtons, settings.model);
     }
+    renderModelOptions();
+    refreshCapabilityOptions();
 }
 
 function resetSettingsToDefault() {
     // 重置分辨率为 1K
     state.selectedResolution = '1K';
-    setActiveOption(elements.resolutionButtons, '1K');
 
-    // 重置纵横比为 auto
-    state.selectedAspectRatio = 'auto';
-    setActiveOption(elements.aspectRatioButtons, 'auto');
+    // 重置纵横比为默认的 1:1
+    state.selectedAspectRatio = '1:1';
 
     // 重置模型为默认值
-    const defaultModel = window.DEFAULT_MODEL || 'gemini-3-pro-image-preview';
+    const defaultModel = window.DEFAULT_MODEL || 'gemini-3.1-flash-image';
     state.selectedModel = defaultModel;
-    setActiveOption(elements.modelButtons, defaultModel);
+    renderModelOptions();
+    refreshCapabilityOptions();
 }
 
 async function showSettingsLockedModal() {
@@ -672,12 +852,6 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
-function setActiveOption(container, value) {
-    container.querySelectorAll('.option-btn').forEach(btn => {
-        btn.classList.toggle('active', btn.dataset.value === value);
-    });
-}
-
 // ========================================
 // 事件绑定
 // ========================================
@@ -691,7 +865,8 @@ function bindEvents() {
 
     // 回车生成（Ctrl+Enter）
     elements.promptInput.addEventListener('keydown', (e) => {
-        if (e.ctrlKey && e.key === 'Enter' && !state.isLoadingSession) {
+        if (e.ctrlKey && e.key === 'Enter' && !state.isLoadingSession && !state.isGenerating) {
+            e.preventDefault();
             handleGenerate();
         }
     });
@@ -701,8 +876,16 @@ function bindEvents() {
         elements.referenceImage.click();
     });
 
+    elements.uploadArea.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            elements.referenceImage.click();
+        }
+    });
+
     elements.referenceImage.addEventListener('change', (e) => {
         handleImageUpload(e.target.files);  // 传入整个files对象
+        e.target.value = '';
     });
 
     // 拖拽上传
@@ -737,10 +920,20 @@ function bindEvents() {
         }
     });
 
-    // 选项按钮
-    setupOptionButtons(elements.resolutionButtons, 'selectedResolution');
-    setupOptionButtons(elements.aspectRatioButtons, 'selectedAspectRatio');
-    setupOptionButtons(elements.modelButtons, 'selectedModel');
+    // 下拉选择；锁定的会话切换到新对话后再继续选择。
+    elements.modelSelect.addEventListener('change', () => {
+        if (state.isSettingsLocked) return showSettingsLockedModal();
+        state.selectedModel = elements.modelSelect.value;
+        refreshCapabilityOptions();
+    });
+    elements.resolutionSelect.addEventListener('change', () => {
+        if (state.isSettingsLocked) return showSettingsLockedModal();
+        state.selectedResolution = elements.resolutionSelect.value;
+    });
+    elements.aspectRatioSelect.addEventListener('change', () => {
+        if (state.isSettingsLocked) return showSettingsLockedModal();
+        state.selectedAspectRatio = elements.aspectRatioSelect.value;
+    });
 
     // 模态框
     elements.modalBackdrop.addEventListener('click', closeImageModal);
@@ -793,20 +986,24 @@ function closeSidebar() {
 // ========================================
 
 async function init() {
+    await loadModelCapabilities();
     bindEvents();
 
-    // 初始化模型按钮选中状态（根据后端传入的默认模型）
-    setActiveOption(elements.modelButtons, state.selectedModel);
+    if (window.IS_AUTHENTICATED) {
+        await loadSessions();
 
-    await loadSessions();
-
-    // 如果有会话，选择第一个
-    if (state.sessions.length > 0) {
-        await selectSession(state.sessions[0].id);
+        // 如果有会话，选择第一个
+        if (state.sessions.length > 0) {
+            await selectSession(state.sessions[0].id);
+        }
     }
 
     // 监听语言切换，重新渲染会话列表和消息
     I18n.onLangChange(() => {
+        updateModelConfigStatus();
+        refreshCapabilityOptions();
+        if (state.modelConfigAvailable) elements.btnGenerate.title = '';
+        else elements.btnGenerate.title = I18n.t('realtime_model_config_unavailable');
         renderSessionList();
         // 如果有当前会话，重新渲染消息以更新图片alt等文本
         if (state.currentSessionId) {
@@ -814,11 +1011,14 @@ async function init() {
             if (cached) {
                 renderMessages(cached.messages);
             } else {
-                getSession(state.currentSessionId).then(session => {
-                    if (session) {
-                        sessionCache.set(state.currentSessionId, session);
+                const requestedSessionId = state.currentSessionId;
+                getSession(requestedSessionId).then(session => {
+                    if (session && state.currentSessionId === requestedSessionId) {
+                        sessionCache.set(requestedSessionId, session);
                         renderMessages(session.messages);
                     }
+                }).catch(error => {
+                    if (error.status !== 401) console.error('刷新会话失败:', error);
                 });
             }
         }

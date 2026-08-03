@@ -27,6 +27,7 @@ const translations = {
 
         // 用户菜单
         credits_label: '点',
+        credit_unit: '点',
         recharge_btn: '💳 充值',
         admin_panel: '管理后台',
         logout: '退出',
@@ -37,10 +38,20 @@ const translations = {
         messages_count: '条消息',
         close_menu: '关闭菜单',
         open_menu: '打开菜单',
+        close_image_preview: '关闭图片预览',
+        close_recharge: '关闭充值窗口',
+        auth_dialog: '用户登录或注册',
+        model_select: 'AI 模型',
+        resolution_select: '分辨率',
+        aspect_ratio_select: '纵横比',
+        upload_reference: '上传参考图片',
+        show_hide: '显示/隐藏',
+        remove_image: '删除参考图',
 
         // 控制面板
         reference_images: '参考图（可选）',
         max_images_hint: '最多14张',
+        max_images_count: '最多{0}张',
         upload: '上传',
         upload_hint: '点击或拖拽',
         upload_desc: '可选：上传参考图进行图生图。支持拖拽或粘贴截图，最多14张',
@@ -117,6 +128,22 @@ const translations = {
         back_to_login: '返回登录',
 
         // 提示消息
+        request_failed: '请求失败',
+        invalid_server_response: '服务器返回了无效响应',
+        sessions_format_invalid: '会话列表格式无效',
+        model_config_empty: '返回的模型配置为空',
+        create_session_failed: '创建会话失败',
+        session_detail_failed: '获取会话详情失败',
+        delete_session_failed: '删除会话失败',
+        read_image_failed: '无法读取图片：{0}',
+        upload_count_exceeded: '最多可上传 {0} 张参考图，超出数量的文件未加入',
+        upload_images_only: '只能上传图片文件',
+        upload_single_too_large: '单张参考图不能超过 10 MiB',
+        upload_total_too_large: '参考图总大小不能超过 35 MiB',
+        realtime_model_config_unavailable: '实时模型和价格配置不可用，已禁止生成，请刷新页面后重试',
+        current_model_unavailable: '当前模型配置不可用，请刷新页面后重试',
+        reference_limit_title: '最多可上传 {0} 张参考图',
+        reference_limit_message: '{0} 最多支持 {1} 张参考图，请删除多余图片后重试。',
         logging_in: '登录中...',
         login_failed: '登录失败',
         network_error: '网络错误，请稍后重试',
@@ -177,6 +204,62 @@ const translations = {
         total_sessions: '总会话数',
         total_messages: '总消息数',
         total_admins: '管理员数',
+        // API 设置
+        api_settings_title: '⚙️ API 设置',
+        api_provider: 'API 服务商',
+        api_key_label: 'API Key',
+        custom_url_label: '自定义 API 端点 URL',
+        system_settings: '系统配置',
+        default_model_label: '默认模型',
+        email_settings: '注册账号发信邮箱设置',
+        api_config_btn: 'API 服务配置',
+        system_config_btn: '系统配置',
+        api_config_desc: '配置服务端点与 API Key',
+        system_config_desc: '配置默认生成模型',
+        pricing_title: '模型定价',
+        pricing_desc: '按模型和分辨率设置每张消耗点数',
+        email_config_desc: '配置 SMTP 邮件发信功能',
+        email_sender_label: '发件人邮箱',
+        email_password_label: '邮箱密码/授权码',
+        smtp_server_label: 'SMTP 服务器',
+        smtp_port_label: 'SMTP 端口',
+        provider_google_ai: 'Google AI Studio（官方）',
+        provider_custom: '自定义 URL',
+        api_checking: '检测中...',
+        api_configured: '已配置',
+        api_not_configured: '未配置',
+        from_env: '来自 .env',
+        save_api_settings: '💾 保存 API 设置',
+        api_key_required: '请输入 API Key',
+        custom_url_required: '请输入自定义 API 端点 URL',
+        api_settings_saved: 'API 设置已保存并生效',
+        save_failed: '保存失败',
+        api_key_placeholder: '输入你的 API Key',
+        custom_url_placeholder: '例如：http://127.0.0.1:8045',
+        email_sender_placeholder: '例如：your_email@example.com',
+        email_password_placeholder: '输入邮箱密码或 SMTP 授权码',
+        smtp_server_placeholder: '例如：smtp.example.com',
+        smtp_port_placeholder: '例如：465',
+        cancel: '取消',
+        close_session_detail: '关闭会话详情',
+        close_pricing: '关闭模型定价',
+        close_api_config: '关闭 API 服务配置',
+        close_system_config: '关闭系统配置',
+        close_email_config: '关闭邮箱配置',
+        model_recommended: 'Nano Banana 2（推荐）',
+        pricing_hint: '设置每个模型在每种官方支持分辨率下，生成一张图片所消耗的点数。管理员不扣点。',
+        save_pricing: '💾 保存价格',
+        pricing_loading: '加载中...',
+        pricing_load_failed: '加载模型价格失败，请刷新后重试。',
+        pricing_input_invalid: '请为每项填写非负整数点数',
+        pricing_saved: '模型价格已保存并立即生效',
+        pricing_credits_unit: '点 / 张',
+        cleanup_messages: '消息',
+        cleanup_images: '图片',
+        cleanup_sessions: '会话',
+        orphan_files: '孤儿文件',
+        cleanup_thumbnails: '缩略图',
+        sending_code: '发送中...',
         data_cleanup: '数据清理',
         quick_cleanup_desc: '快速清理：清理7天前的所有数据（包含图片、缩略图、孤儿文件）',
         cleanup_7days: '🗑️ 清理7天前数据',
@@ -270,6 +353,7 @@ const translations = {
 
         // User menu
         credits_label: 'credits',
+        credit_unit: 'credits',
         recharge_btn: '💳 Recharge',
         admin_panel: 'Admin Panel',
         logout: 'Logout',
@@ -280,10 +364,20 @@ const translations = {
         messages_count: 'messages',
         close_menu: 'Close menu',
         open_menu: 'Open menu',
+        close_image_preview: 'Close image preview',
+        close_recharge: 'Close recharge window',
+        auth_dialog: 'Login or registration',
+        model_select: 'AI Model',
+        resolution_select: 'Resolution',
+        aspect_ratio_select: 'Aspect Ratio',
+        upload_reference: 'Upload reference images',
+        show_hide: 'Show/hide',
+        remove_image: 'Remove reference image',
 
         // Control panel
         reference_images: 'Reference Images (Optional)',
         max_images_hint: 'Max 14',
+        max_images_count: 'Max {0}',
         upload: 'Upload',
         upload_hint: 'Click or drag',
         upload_desc: 'Optional: Upload reference images. Support drag & drop or paste, max 14 images',
@@ -360,6 +454,22 @@ const translations = {
         back_to_login: 'Back to Login',
 
         // Toast messages
+        request_failed: 'Request failed',
+        invalid_server_response: 'The server returned an invalid response',
+        sessions_format_invalid: 'Invalid session list format',
+        model_config_empty: 'The model configuration is empty',
+        create_session_failed: 'Failed to create session',
+        session_detail_failed: 'Failed to load session',
+        delete_session_failed: 'Failed to delete session',
+        read_image_failed: 'Could not read image: {0}',
+        upload_count_exceeded: 'Maximum {0} reference images allowed; extra files were not added',
+        upload_images_only: 'Only image files can be uploaded',
+        upload_single_too_large: 'A reference image cannot exceed 10 MiB',
+        upload_total_too_large: 'Reference images cannot exceed 35 MiB in total',
+        realtime_model_config_unavailable: 'Live model and pricing configuration is unavailable. Generation is disabled; refresh and try again.',
+        current_model_unavailable: 'The current model configuration is unavailable. Refresh and try again.',
+        reference_limit_title: 'Maximum {0} reference images allowed',
+        reference_limit_message: '{0} supports at most {1} reference images. Remove extra images and try again.',
         logging_in: 'Logging in...',
         login_failed: 'Login failed',
         network_error: 'Network error, please try again later',
@@ -420,6 +530,62 @@ const translations = {
         total_sessions: 'Total Sessions',
         total_messages: 'Total Messages',
         total_admins: 'Admins',
+        // API Settings
+        api_settings_title: '⚙️ API Settings',
+        api_provider: 'API Provider',
+        api_key_label: 'API Key',
+        custom_url_label: 'Custom API Endpoint URL',
+        system_settings: 'System Configuration',
+        default_model_label: 'Default Model',
+        email_settings: 'Registration Email Configuration',
+        api_config_btn: 'API Configuration',
+        system_config_btn: 'System Configuration',
+        api_config_desc: 'Configure the service endpoint and API key',
+        system_config_desc: 'Configure the default generation model',
+        pricing_title: 'Model Pricing',
+        pricing_desc: 'Set per-image credits by model and resolution',
+        email_config_desc: 'Configure SMTP email delivery',
+        email_sender_label: 'Sender Email',
+        email_password_label: 'Email Password / App Password',
+        smtp_server_label: 'SMTP Server',
+        smtp_port_label: 'SMTP Port',
+        provider_google_ai: 'Google AI Studio (Official)',
+        provider_custom: 'Custom URL',
+        api_checking: 'Checking...',
+        api_configured: 'Configured',
+        api_not_configured: 'Not Configured',
+        from_env: 'From .env',
+        save_api_settings: '💾 Save API Settings',
+        api_key_required: 'Please enter API Key',
+        custom_url_required: 'Please enter custom API endpoint URL',
+        api_settings_saved: 'API settings saved and applied',
+        save_failed: 'Save Failed',
+        api_key_placeholder: 'Enter your API key',
+        custom_url_placeholder: 'e.g. http://127.0.0.1:8045',
+        email_sender_placeholder: 'e.g. your_email@example.com',
+        email_password_placeholder: 'Enter email password or SMTP app password',
+        smtp_server_placeholder: 'e.g. smtp.example.com',
+        smtp_port_placeholder: 'e.g. 465',
+        cancel: 'Cancel',
+        close_session_detail: 'Close session details',
+        close_pricing: 'Close model pricing',
+        close_api_config: 'Close API configuration',
+        close_system_config: 'Close system configuration',
+        close_email_config: 'Close email configuration',
+        model_recommended: 'Nano Banana 2 (Recommended)',
+        pricing_hint: 'Set the credits consumed for one image at each officially supported resolution. Administrators are not charged.',
+        save_pricing: '💾 Save Pricing',
+        pricing_loading: 'Loading...',
+        pricing_load_failed: 'Failed to load model pricing. Refresh and try again.',
+        pricing_input_invalid: 'Enter a non-negative integer credit value for every item',
+        pricing_saved: 'Model pricing saved and applied',
+        pricing_credits_unit: 'credits / image',
+        cleanup_messages: 'Messages',
+        cleanup_images: 'Images',
+        cleanup_sessions: 'Sessions',
+        orphan_files: 'Orphan files',
+        cleanup_thumbnails: 'Thumbnails',
+        sending_code: 'Sending...',
         data_cleanup: 'Data Cleanup',
         quick_cleanup_desc: 'Quick cleanup: Clean all data older than 7 days (including images, thumbnails, orphan files)',
         cleanup_7days: '🗑️ Clean 7 Days Ago',
@@ -506,6 +672,12 @@ const translations = {
 class I18nManager {
     constructor() {
         this.currentLang = DEFAULT_LANG;
+        try {
+            const savedLang = localStorage.getItem('i18n_lang');
+            if (savedLang && translations[savedLang]) this.currentLang = savedLang;
+        } catch (error) {
+            console.warn('Unable to read the saved language preference:', error);
+        }
         this.listeners = [];
     }
 
@@ -513,12 +685,6 @@ class I18nManager {
      * 初始化 - 读取 localStorage 或使用默认语言
      */
     init() {
-        const savedLang = localStorage.getItem('i18n_lang');
-        if (savedLang && translations[savedLang]) {
-            this.currentLang = savedLang;
-        } else {
-            this.currentLang = DEFAULT_LANG;
-        }
         this.applyToPage();
         this.updateLangButtons();
         this.bindLangSwitch();
@@ -546,7 +712,11 @@ class I18nManager {
     switchTo(lang) {
         if (!translations[lang]) return;
         this.currentLang = lang;
-        localStorage.setItem('i18n_lang', lang);
+        try {
+            localStorage.setItem('i18n_lang', lang);
+        } catch (error) {
+            console.warn('Unable to save the language preference:', error);
+        }
         this.applyToPage();
         this.updateLangButtons();
         // 通知监听器
@@ -585,6 +755,10 @@ class I18nManager {
         const translated = translations[this.currentLang]?.[errorMsg];
         if (translated) {
             return translated;
+        }
+        // 英文界面不直接透传后端的中文错误，使用调用方提供的英文兜底。
+        if (this.currentLang !== 'zh' && /[\u3400-\u9fff]/.test(errorMsg)) {
+            return this.t(defaultKey);
         }
         // 否则返回原始消息
         return errorMsg;
@@ -630,6 +804,14 @@ class I18nManager {
             const key = el.getAttribute('data-i18n-title');
             if (key) {
                 el.title = this.t(key);
+            }
+        });
+
+        // 更新无障碍标签
+        document.querySelectorAll('[data-i18n-aria-label]').forEach(el => {
+            const key = el.getAttribute('data-i18n-aria-label');
+            if (key) {
+                el.setAttribute('aria-label', this.t(key));
             }
         });
 

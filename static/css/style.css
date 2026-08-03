@@ -332,6 +332,9 @@ body.admin-page {
     font-weight: 500;
     text-decoration: none;
     transition: all var(--transition-fast);
+    border: none;
+    cursor: pointer;
+    font-family: inherit;
 }
 
 .btn-user-logout:hover {
@@ -709,6 +712,12 @@ body.admin-page {
 .upload-area:hover {
     border-color: var(--accent-purple);
     background: rgba(139, 92, 246, 0.05);
+}
+
+.upload-area:focus-visible {
+    outline: 3px solid rgba(168, 85, 247, 0.35);
+    outline-offset: 3px;
+    border-color: var(--accent-purple);
 }
 
 .upload-area.drag-over {
@@ -1937,7 +1946,13 @@ body.admin-page {
 
 .admin-actions {
     display: flex;
+    align-items: center;
     gap: var(--spacing-md);
+}
+
+.logout-form {
+    display: inline-flex;
+    margin: 0;
 }
 
 .btn-back,
@@ -1965,6 +1980,8 @@ body.admin-page {
     background: var(--error);
     color: white;
     border: none;
+    cursor: pointer;
+    font-family: inherit;
 }
 
 .btn-logout:hover {
@@ -2019,6 +2036,314 @@ body.admin-page {
 .stat-label {
     font-size: 0.85rem;
     color: var(--text-secondary);
+}
+
+/* API 设置区域（保留兼容旧版）*/
+.api-settings-form {
+    background: var(--bg-card);
+    padding: var(--spacing-lg);
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--border-color);
+}
+
+/* ========================================
+   弹窗表单专属样式（mf = modal form）
+   完全隔离，不受其他全局样式影响
+   ======================================== */
+
+/* 表单项容器 */
+.mfg {
+    margin-bottom: 16px;
+}
+
+.mfg:last-child {
+    margin-bottom: 0;
+}
+
+/* 标签 */
+.mfg label {
+    display: block;
+    margin-bottom: 6px;
+    font-size: 0.88rem;
+    font-weight: 500;
+    color: var(--text-secondary);
+    letter-spacing: 0.01em;
+}
+
+/* 输入框 */
+.mf-input {
+    width: 100%;
+    padding: 10px 14px;
+    background: var(--bg-input);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    color: var(--text-primary);
+    font-family: inherit;
+    font-size: 0.9rem;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+    box-sizing: border-box;
+    outline: none;
+}
+
+.mf-input:focus {
+    border-color: var(--accent-blue);
+    box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15);
+}
+
+/* 下拉框 */
+.mf-select {
+    width: 100%;
+    padding: 10px 36px 10px 14px;
+    background: var(--bg-input);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    color: var(--text-primary);
+    font-family: inherit;
+    font-size: 0.9rem;
+    cursor: pointer;
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%239ca3af' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 12px center;
+    box-sizing: border-box;
+    outline: none;
+    transition: border-color 0.15s ease;
+}
+
+.mf-select:focus {
+    border-color: var(--accent-blue);
+    box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15);
+}
+
+/* 弹窗底部按钮区 */
+.modal-footer {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 10px;
+    padding: 16px 24px;
+    border-top: 1px solid var(--border-color);
+    flex-shrink: 0;
+}
+
+.mf-btn-cancel {
+    padding: 8px 18px;
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    font-size: 0.9rem;
+    font-family: inherit;
+    cursor: pointer;
+    transition: background 0.15s ease;
+}
+
+.mf-btn-cancel:hover {
+    background: var(--bg-hover);
+}
+
+.mf-btn-save {
+    padding: 8px 20px;
+    background: linear-gradient(135deg, var(--accent-blue), var(--accent-purple));
+    color: white;
+    border: none;
+    border-radius: var(--radius-md);
+    font-size: 0.9rem;
+    font-weight: 600;
+    font-family: inherit;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.mf-btn-save:hover {
+    opacity: 0.9;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 15px rgba(99, 102, 241, 0.35);
+}
+
+.mf-btn-save:active {
+    transform: translateY(0);
+}
+
+/* API Key 输入组（密码框+眼睛按钮）在弹窗内 */
+.mfg .api-key-input-group {
+    display: flex;
+    gap: 0;
+}
+
+.mfg .api-key-input-group .mf-input {
+    border-top-right-radius: 0;
+    border-bottom-right-radius: 0;
+    flex: 1;
+}
+
+.api-status-row {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-md);
+    margin-bottom: var(--spacing-lg);
+    padding: var(--spacing-md);
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-md);
+}
+
+.api-status-indicator {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+}
+
+.status-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--text-muted);
+    flex-shrink: 0;
+}
+
+.status-dot.status-connected {
+    background: #22c55e;
+    box-shadow: 0 0 8px rgba(34, 197, 94, 0.5);
+    animation: pulse-green 2s infinite;
+}
+
+.status-dot.status-disconnected {
+    background: #ef4444;
+    box-shadow: 0 0 8px rgba(239, 68, 68, 0.5);
+}
+
+@keyframes pulse-green {
+
+    0%,
+    100% {
+        opacity: 1;
+    }
+
+    50% {
+        opacity: 0.5;
+    }
+}
+
+.status-text {
+    font-size: 0.9rem;
+    font-weight: 500;
+    color: var(--text-primary);
+}
+
+.api-source-badge {
+    font-size: 0.75rem;
+    padding: 2px 8px;
+    border-radius: 4px;
+    background: rgba(245, 158, 11, 0.15);
+    color: #f59e0b;
+    font-weight: 500;
+}
+
+.modal-body .form-group {
+    margin-bottom: var(--spacing-md);
+}
+
+.modal-body .form-group label {
+    display: block;
+    margin-bottom: var(--spacing-xs);
+    font-size: 0.9rem;
+    font-weight: 500;
+    color: var(--text-secondary);
+}
+
+.modal-body .form-input {
+    width: 100%;
+    padding: var(--spacing-sm) var(--spacing-md);
+    background: var(--bg-input);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    color: var(--text-primary);
+    font-family: inherit;
+    font-size: 0.9rem;
+    transition: border-color var(--transition-fast);
+    box-sizing: border-box;
+}
+
+.modal-body .form-input:focus {
+    outline: none;
+    border-color: var(--accent-blue);
+    box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15);
+}
+
+.modal-body .form-select {
+    width: 100%;
+    padding: var(--spacing-sm) var(--spacing-md);
+    background: var(--bg-input);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    color: var(--text-primary);
+    font-family: inherit;
+    font-size: 0.9rem;
+    cursor: pointer;
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%239ca3af' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 12px center;
+    padding-right: 36px;
+}
+
+.modal-body .form-select:focus {
+    outline: none;
+    border-color: var(--accent-blue);
+}
+
+.api-key-input-group {
+    display: flex;
+    gap: 0;
+}
+
+.api-key-input-group .form-input {
+    border-top-right-radius: 0;
+    border-bottom-right-radius: 0;
+    flex: 1;
+}
+
+.btn-toggle-visibility {
+    padding: var(--spacing-sm) var(--spacing-md);
+    background: var(--bg-input);
+    border: 1px solid var(--border-color);
+    border-left: none;
+    border-top-right-radius: var(--radius-md);
+    border-bottom-right-radius: var(--radius-md);
+    color: var(--text-secondary);
+    cursor: pointer;
+    font-size: 1rem;
+    transition: background var(--transition-fast);
+    display: flex;
+    align-items: center;
+}
+
+.btn-toggle-visibility:hover {
+    background: var(--bg-hover);
+}
+
+.btn-save-api {
+    width: auto;
+    padding: var(--spacing-md) var(--spacing-lg);
+    border: none;
+    border-radius: var(--radius-md);
+    background: linear-gradient(135deg, var(--accent-blue), var(--accent-purple));
+    color: white;
+    font-size: 0.95rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+    margin-top: var(--spacing-sm);
+}
+
+.btn-save-api:hover {
+    opacity: 0.9;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 15px rgba(99, 102, 241, 0.3);
+}
+
+.btn-save-api:active {
+    transform: translateY(0);
 }
 
 /* 清理控制区 */
@@ -2909,4 +3234,50 @@ body.admin-page {
 
 .btn-copy:hover {
     background: rgba(99, 102, 241, 0.3) !important;
+}
+
+.pricing-editor {
+    display: grid;
+    gap: var(--spacing-md);
+}
+
+.pricing-model {
+    padding: var(--spacing-md);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    background: var(--bg-tertiary);
+}
+
+.pricing-model h4 { margin: 0 0 var(--spacing-sm); color: var(--text-primary); }
+.pricing-size-grid { display: flex; flex-wrap: wrap; gap: var(--spacing-sm); }
+.pricing-field { display: grid; grid-template-columns: auto 76px auto; align-items: center; gap: 6px; color: var(--text-secondary); }
+.pricing-field input { width: 76px; padding: 7px; color: var(--text-primary); background: var(--bg-input); border: 1px solid var(--border-color); border-radius: var(--radius-sm); }
+.pricing-field small { color: var(--text-muted); }
+
+/* 首页生成参数下拉框 */
+.generation-select {
+    width: 100%;
+    min-height: 46px;
+    padding: 0 42px 0 14px;
+    color: var(--text-primary);
+    background: var(--bg-input);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    font: inherit;
+    cursor: pointer;
+}
+
+.generation-select:focus {
+    outline: none;
+    border-color: var(--accent-purple);
+    box-shadow: 0 0 0 3px rgba(168, 85, 247, 0.15);
+}
+
+.generation-select:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+.model-config-error {
+    color: var(--error);
 }

@@ -2,12 +2,24 @@
 // 认证相关逻辑（从 index.html 提取）
 // ========================================
 
+function setTranslatedStatus(element, key, fallbackKey = '') {
+    element.dataset.i18nStatusKey = key || '';
+    element.dataset.i18nStatusFallback = fallbackKey;
+    element.textContent = fallbackKey ? I18n.translateError(key, fallbackKey) : I18n.t(key);
+}
+
+function clearTranslatedStatus(element) {
+    element.textContent = '';
+    delete element.dataset.i18nStatusKey;
+    delete element.dataset.i18nStatusFallback;
+}
+
 function switchAuthMode(mode) {
     const loginSection = document.getElementById('loginSection');
     const registerSection = document.getElementById('registerSection');
     const errorDivs = document.querySelectorAll('.form-error');
 
-    errorDivs.forEach(div => div.textContent = '');
+    errorDivs.forEach(clearTranslatedStatus);
 
     if (mode === 'register') {
         loginSection.style.display = 'none';
@@ -24,10 +36,10 @@ document.getElementById('loginForm').addEventListener('submit', async (e) => {
     const password = document.getElementById('loginPassword').value;
     const errorDiv = document.getElementById('loginError');
 
-    errorDiv.textContent = I18n.t('logging_in');
+    setTranslatedStatus(errorDiv, 'logging_in');
 
     try {
-        const response = await fetch('/api/login', {
+        const response = await window.apiFetch('/api/login', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ username, password })
@@ -39,11 +51,11 @@ document.getElementById('loginForm').addEventListener('submit', async (e) => {
             location.reload();
         } else {
             const translatedError = I18n.translateError(data.error, 'login_failed');
-            errorDiv.textContent = translatedError;
+            setTranslatedStatus(errorDiv, data.error, 'login_failed');
             Modal.toast(translatedError, 'error');
         }
     } catch (error) {
-        errorDiv.textContent = I18n.t('network_error');
+        setTranslatedStatus(errorDiv, 'network_error');
         Modal.toast(I18n.t('network_error'), 'error');
     }
 });
@@ -53,6 +65,8 @@ document.getElementById('loginForm').addEventListener('submit', async (e) => {
 // 发送验证码逻辑
 // ========================================
 let countdownTimer = null;
+let countdownRemaining = null;
+let isSendingCode = false;
 const btnSendCode = document.getElementById('btnSendCode');
 const regEmail = document.getElementById('regEmail');
 const codeHint = document.getElementById('codeHint');
@@ -75,10 +89,11 @@ btnSendCode.addEventListener('click', async () => {
     }
 
     btnSendCode.disabled = true;
-    btnSendCode.textContent = I18n.t('logging_in').replace('登录', I18n.t('send_code').split(' ')[0]);
+    isSendingCode = true;
+    btnSendCode.textContent = I18n.t('sending_code');
 
     try {
-        const response = await fetch('/api/send-verification-code', {
+        const response = await window.apiFetch('/api/send-verification-code', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ email })
@@ -87,21 +102,23 @@ btnSendCode.addEventListener('click', async () => {
         const data = await response.json();
 
         if (response.ok) {
+            isSendingCode = false;
             Modal.toast(I18n.t('code_sent'), 'success');
             codeHint.textContent = I18n.t('code_sent_hint');
             codeHint.style.display = 'block';
             codeHint.style.color = '#28a745';
 
             // 开始60秒倒计时
-            let countdown = 60;
-            btnSendCode.textContent = `${countdown}${I18n.t('seconds_retry')}`;
+            countdownRemaining = 60;
+            btnSendCode.textContent = `${countdownRemaining}${I18n.t('seconds_retry')}`;
 
             countdownTimer = setInterval(() => {
-                countdown--;
-                if (countdown > 0) {
-                    btnSendCode.textContent = `${countdown}${I18n.t('seconds_retry')}`;
+                countdownRemaining--;
+                if (countdownRemaining > 0) {
+                    btnSendCode.textContent = `${countdownRemaining}${I18n.t('seconds_retry')}`;
                 } else {
                     clearInterval(countdownTimer);
+                    countdownRemaining = null;
                     btnSendCode.disabled = false;
                     btnSendCode.textContent = I18n.t('send_code');
                 }
@@ -110,11 +127,15 @@ btnSendCode.addEventListener('click', async () => {
             // 翻译后端错误消息
             const translatedError = I18n.translateError(data.error, 'send_failed');
             Modal.toast(translatedError, 'error');
+            isSendingCode = false;
+            countdownRemaining = null;
             btnSendCode.disabled = false;
             btnSendCode.textContent = I18n.t('send_code');
         }
     } catch (error) {
         Modal.toast(I18n.t('network_error'), 'error');
+        isSendingCode = false;
+        countdownRemaining = null;
         btnSendCode.disabled = false;
         btnSendCode.textContent = I18n.t('send_code');
     }
@@ -130,21 +151,21 @@ document.getElementById('registerForm').addEventListener('submit', async (e) => 
     const errorDiv = document.getElementById('registerError');
 
     if (password !== confirmPassword) {
-        errorDiv.textContent = I18n.t('passwords_not_match');
+        setTranslatedStatus(errorDiv, 'passwords_not_match');
         Modal.toast(I18n.t('passwords_not_match'), 'warning');
         return;
     }
 
     if (!verificationCode) {
-        errorDiv.textContent = I18n.t('enter_code');
+        setTranslatedStatus(errorDiv, 'enter_code');
         Modal.toast(I18n.t('enter_code'), 'warning');
         return;
     }
 
-    errorDiv.textContent = I18n.t('registering');
+    setTranslatedStatus(errorDiv, 'registering');
 
     try {
-        const response = await fetch('/api/register', {
+        const response = await window.apiFetch('/api/register', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ username, email, password, verification_code: verificationCode })
@@ -159,12 +180,28 @@ document.getElementById('registerForm').addEventListener('submit', async (e) => 
             document.getElementById('loginPassword').focus();
         } else {
             const translatedError = I18n.translateError(data.error, 'register_failed');
-            errorDiv.textContent = translatedError;
+            setTranslatedStatus(errorDiv, data.error, 'register_failed');
             Modal.toast(translatedError, 'error');
         }
     } catch (error) {
-        errorDiv.textContent = I18n.t('network_error');
+        setTranslatedStatus(errorDiv, 'network_error');
         Modal.toast(I18n.t('network_error'), 'error');
+    }
+});
+
+I18n.onLangChange(() => {
+    document.querySelectorAll('[data-i18n-status-key]').forEach(element => {
+        const key = element.dataset.i18nStatusKey;
+        const fallbackKey = element.dataset.i18nStatusFallback;
+        element.textContent = fallbackKey ? I18n.translateError(key, fallbackKey) : I18n.t(key);
+    });
+
+    if (codeHint.style.display !== 'none') codeHint.textContent = I18n.t('code_sent_hint');
+    if (isSendingCode) btnSendCode.textContent = I18n.t('sending_code');
+    else if (countdownRemaining !== null) {
+        btnSendCode.textContent = `${countdownRemaining}${I18n.t('seconds_retry')}`;
+    } else {
+        btnSendCode.textContent = I18n.t('send_code');
     }
 });
 
@@ -176,24 +213,57 @@ const btnRecharge = document.getElementById('btnRecharge');
 const closeRechargeModal = document.getElementById('closeRechargeModal');
 const btnRedeem = document.getElementById('btnRedeem');
 const cardKeyInput = document.getElementById('cardKeyInput');
+let rechargeReturnFocus = null;
+let rechargeOpenTimer = null;
+let rechargeCloseTimer = null;
+let rechargeClosing = false;
+
+function getRechargeFocusableElements() {
+    if (!rechargeModalOverlay) return [];
+    const selector = [
+        'a[href]',
+        'button:not([disabled])',
+        'input:not([disabled]):not([type="hidden"])',
+        'select:not([disabled])',
+        'textarea:not([disabled])',
+        '[tabindex]:not([tabindex="-1"])'
+    ].join(',');
+    return Array.from(rechargeModalOverlay.querySelectorAll(selector)).filter(element => (
+        !element.hidden && element.getAttribute('aria-hidden') !== 'true'
+    ));
+}
+
+function openRechargeModalFunc() {
+    if (!rechargeModalOverlay) return;
+    const wasHidden = rechargeModalOverlay.style.display === 'none';
+    window.clearTimeout(rechargeOpenTimer);
+    window.clearTimeout(rechargeCloseTimer);
+    if (wasHidden || !rechargeReturnFocus?.isConnected) rechargeReturnFocus = document.activeElement;
+    rechargeClosing = false;
+    rechargeModalOverlay.style.display = 'flex';
+    rechargeOpenTimer = window.setTimeout(() => {
+        rechargeModalOverlay.classList.add('active');
+        (closeRechargeModal || getRechargeFocusableElements()[0])?.focus();
+    }, 10);
+}
 
 // 打开充值弹窗
 if (btnRecharge) {
-    btnRecharge.addEventListener('click', () => {
-        rechargeModalOverlay.style.display = 'flex';
-        // 使用 setTimeout 确保 display 先生效，然后再触发过渡动画
-        setTimeout(() => {
-            rechargeModalOverlay.classList.add('active');
-        }, 10);
-    });
+    btnRecharge.addEventListener('click', openRechargeModalFunc);
 }
 
 // 关闭充值弹窗
 function closeRechargeModalFunc() {
+    if (!rechargeModalOverlay || rechargeClosing || rechargeModalOverlay.style.display === 'none') return;
+    rechargeClosing = true;
+    window.clearTimeout(rechargeOpenTimer);
     rechargeModalOverlay.classList.remove('active');
-    // 等待过渡动画结束后隐藏元素
-    setTimeout(() => {
+    const returnFocus = rechargeReturnFocus;
+    rechargeCloseTimer = window.setTimeout(() => {
         rechargeModalOverlay.style.display = 'none';
+        rechargeClosing = false;
+        rechargeReturnFocus = null;
+        if (returnFocus?.isConnected) returnFocus.focus();
     }, 300);
 }
 
@@ -203,9 +273,38 @@ if (closeRechargeModal) {
 
 // 点击遮罩关闭
 if (rechargeModalOverlay) {
+    rechargeModalOverlay.tabIndex = -1;
     rechargeModalOverlay.addEventListener('click', (e) => {
         if (e.target === rechargeModalOverlay) {
             closeRechargeModalFunc();
+        }
+    });
+
+    rechargeModalOverlay.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+            e.preventDefault();
+            e.stopPropagation();
+            closeRechargeModalFunc();
+            return;
+        }
+
+        if (e.key !== 'Tab') return;
+        const focusable = getRechargeFocusableElements();
+        if (focusable.length === 0) {
+            e.preventDefault();
+            rechargeModalOverlay.focus();
+            return;
+        }
+
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        const activeElement = document.activeElement;
+        if (e.shiftKey && (activeElement === first || !rechargeModalOverlay.contains(activeElement))) {
+            e.preventDefault();
+            last.focus();
+        } else if (!e.shiftKey && (activeElement === last || !rechargeModalOverlay.contains(activeElement))) {
+            e.preventDefault();
+            first.focus();
         }
     });
 }
@@ -225,7 +324,7 @@ if (btnRedeem) {
         btnRedeem.textContent = I18n.t('recharging');
 
         try {
-            const response = await fetch('/api/redeem', {
+            const response = await window.apiFetch('/api/redeem', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ code })

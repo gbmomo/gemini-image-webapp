@@ -111,6 +111,48 @@
     color: var(--text-secondary, #a1a1aa);
     font-size: 1rem;
     line-height: 1.6;
+    overflow-y: auto;
+}
+
+.generated-keys-warning {
+    margin: 0 0 12px;
+    color: #f59e0b;
+    font-weight: 600;
+}
+
+.generated-keys-list {
+    display: grid;
+    gap: 8px;
+    max-height: 400px;
+    overflow-y: auto;
+}
+
+.generated-key-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 10px;
+    background: rgba(139, 92, 246, 0.1);
+    border-radius: 8px;
+}
+
+.generated-key-item code {
+    min-width: 0;
+    overflow-wrap: anywhere;
+    color: var(--accent-purple-light, #c084fc);
+    font-size: 1rem;
+    font-weight: 600;
+}
+
+.generated-key-copy {
+    flex-shrink: 0;
+    padding: 4px 8px;
+    color: var(--accent-blue, #6366f1);
+    background: rgba(99, 102, 241, 0.2);
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
 }
 
 /* Input for Prompt */
@@ -345,6 +387,10 @@
     background: rgba(255, 255, 255, 0.02);
     position: relative;
     overflow: hidden;
+    width: 100%;
+    color: inherit;
+    font: inherit;
+    text-align: left;
 }
 
 .session-list-item::before {
@@ -593,17 +639,74 @@
 }
 
 @media (max-width: 600px) {
+    .modal-large-xl {
+        width: 100vw;
+        height: 100dvh;
+        max-height: 100dvh;
+        border-radius: 0;
+    }
+
+    .modal-large-xl .modal-header {
+        padding: 12px 16px;
+    }
+
+    .session-viewer-container {
+        flex-direction: column;
+    }
+
     .session-viewer-sidebar {
-        width: 180px;
-        min-width: 180px;
+        width: 100%;
+        min-width: 0;
+        height: auto;
+        max-height: 38%;
+        border-right: none;
+        border-bottom: 1px solid rgba(139, 92, 246, 0.12);
+    }
+
+    .session-viewer-sidebar-header {
+        padding: 10px 14px;
+    }
+
+    .session-viewer-list {
+        display: flex;
+        gap: 8px;
+        padding: 8px;
+        overflow-x: auto;
+        overflow-y: hidden;
     }
 
     .session-list-item {
+        width: min(72vw, 260px);
+        min-width: min(72vw, 260px);
         padding: 10px 12px;
+        margin-bottom: 0;
     }
 
     .session-list-item-title {
         font-size: 0.85rem;
+    }
+
+    .session-viewer-main {
+        min-height: 0;
+    }
+
+    .session-viewer-content {
+        padding: 16px 12px;
+        gap: 18px;
+    }
+
+    .viewer-avatar {
+        width: 34px;
+        height: 34px;
+    }
+
+    .viewer-content-wrapper {
+        max-width: calc(100% - 46px);
+    }
+
+    .viewer-image {
+        max-width: 100% !important;
+        max-height: 45vh !important;
     }
 }
 /* ========================================

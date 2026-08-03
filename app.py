@@ -9,6 +9,7 @@ import json
 import uuid
 import re
 import base64
+import binascii
 import logging
 import time
 import threading
@@ -16,35 +17,67 @@ from datetime import datetime, timedelta
 from functools import wraps
 from PIL import Image
 import io
-from filelock import FileLock
+from filelock import FileLock, Timeout as FileLockTimeout
 from flask import Flask, render_template, request, jsonify, send_from_directory, session, redirect, url_for
 from werkzeug.utils import secure_filename
+from werkzeug.middleware.proxy_fix import ProxyFix
 from google import genai
 from google.genai import types, errors as genai_errors
 from dotenv import load_dotenv
 from flask_wtf.csrf import CSRFProtect
+from flask_wtf.csrf import CSRFError
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from flask_talisman import Talisman
 from flask_compress import Compress
+
+# 加载 .env 文件中的环境变量（必须在导入 email_service 之前）
+load_dotenv()
 
 # 配置日志（根据环境动态设置级别）
 _log_level = logging.DEBUG if os.getenv('FLASK_ENV') != 'production' else logging.INFO
 logging.basicConfig(level=_log_level)
 logger = logging.getLogger(__name__)
 
-# 加载 .env 文件中的环境变量（必须在导入 email_service 之前）
-load_dotenv()
-
 # 导入需要环境变量的模块
-from database import create_user, verify_user, get_user_by_id, get_all_users, delete_user, toggle_admin, update_user_credits, generate_card_keys, get_all_card_keys, use_card_key, create_verification_code, verify_email_code, cleanup_expired_codes
+from database import (
+    cleanup_expired_codes,
+    create_verification_code,
+    delete_user,
+    delete_verification_code,
+    generate_card_keys,
+    get_active_api_settings,
+    get_all_card_keys,
+    get_all_users,
+    get_model_pricing,
+    get_stale_generation_charges,
+    get_user_by_id,
+    register_user_with_verification_code,
+    reserve_generation_credits,
+    resolve_generation_charge,
+    save_api_settings,
+    save_model_pricing,
+    toggle_admin,
+    update_user_credits,
+    use_card_key,
+    verify_user,
+)
 from email_service import generate_verification_code, send_verification_email
 from werkzeug.security import generate_password_hash
 
-app = Flask(__name__)
+app = Flask(__name__, static_folder=None)
 app.secret_key = os.getenv("SECRET_KEY")
 if not app.secret_key:
     raise ValueError("请设置环境变量 SECRET_KEY 或在 .env 文件中配置")
+
+_trust_proxy_count = int(os.getenv("TRUST_PROXY_COUNT", "0"))
+if _trust_proxy_count > 0:
+    app.wsgi_app = ProxyFix(
+        app.wsgi_app,
+        x_for=_trust_proxy_count,
+        x_proto=_trust_proxy_count,
+        x_host=_trust_proxy_count,
+    )
 
 # Session 安全配置
 app.config['SESSION_COOKIE_SECURE'] = os.getenv('FLASK_ENV') == 'production'  # 生产环境启用HTTPS only
@@ -52,9 +85,10 @@ app.config['SESSION_COOKIE_HTTPONLY'] = True  # 防止JavaScript访问cookie
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'  # CSRF保护
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(days=7)  # Session过期时间
 
-# CSRF 保护配置
-app.config['WTF_CSRF_CHECK_DEFAULT'] = False  # 默认不检查，手动控制
-app.config['WTF_CSRF_TIME_LIMIT'] = None  # CSRF token不过期
+# CSRF 与请求体保护配置
+app.config['WTF_CSRF_CHECK_DEFAULT'] = True
+app.config['WTF_CSRF_TIME_LIMIT'] = 3600
+app.config['MAX_CONTENT_LENGTH'] = int(os.getenv('MAX_REQUEST_BYTES', 50 * 1024 * 1024))
 csrf = CSRFProtect(app)
 
 # 速率限制配置
@@ -62,7 +96,7 @@ limiter = Limiter(
     app=app,
     key_func=get_remote_address,
     default_limits=["1000 per day", "100 per hour"],
-    storage_uri="memory://"
+    storage_uri=os.getenv("RATELIMIT_STORAGE_URI", "memory://")
 )
 
 # Gzip 压缩配置（优化网络传输）
@@ -84,6 +118,29 @@ compress.init_app(app)
 def ratelimit_handler(e):
     return jsonify({"error": "请求过于频繁，请稍后再试"}), 429
 
+
+@app.errorhandler(413)
+def request_too_large_handler(e):
+    return jsonify({"error": "请求体过大，请压缩参考图片后重试"}), 413
+
+
+@app.errorhandler(CSRFError)
+def csrf_error_handler(e):
+    if request.path.startswith("/api/"):
+        return jsonify({"error": "页面验证已失效，请刷新后重试"}), 400
+    return e.description, 400
+
+
+@app.errorhandler(FileLockTimeout)
+def file_lock_timeout_handler(e):
+    logger.warning("等待文件锁超时: %s", e)
+    if request.path.startswith("/api/"):
+        return jsonify({
+            "error": "请求正在处理中，请稍后重试",
+            "error_code": "LOCK_TIMEOUT",
+        }), 503
+    return "请求正在处理中，请稍后重试", 503
+
 # 安全响应头（仅在生产环境启用HTTPS强制）
 if os.getenv('FLASK_ENV') == 'production':
     Talisman(app, 
@@ -97,33 +154,62 @@ if os.getenv('FLASK_ENV') == 'production':
                  'img-src': ["'self'", "data:"],
              })
 
-# 配置
-API_KEY = os.getenv("GEMINI_API_KEY")
-if not API_KEY:
-    raise ValueError("请设置环境变量 GEMINI_API_KEY 或在 .env 文件中配置")
+# 获取默认模型的辅助函数
+def get_default_model():
+    db_settings = get_active_api_settings()
+    if db_settings and db_settings.get("default_model") in ALLOWED_MODELS:
+        return db_settings["default_model"]
+    env_default = os.getenv("DEFAULT_MODEL")
+    if env_default in ALLOWED_MODELS:
+        return env_default
+    return "gemini-3.1-flash-image"
 
-# 自定义 API 端点（可选）
-API_BASE_URL = os.getenv("GEMINI_API_BASE_URL")
+DATA_DIR = os.getenv("DATA_DIR", "data")
+SESSIONS_DIR = os.path.join(DATA_DIR, "sessions")
+IMAGES_DIR = os.getenv("IMAGES_DIR", "static/images")
+THUMBNAILS_DIR = os.getenv("THUMBNAILS_DIR", "static/thumbnails")
+MAINTENANCE_LOCK_FILE = os.path.join(DATA_DIR, ".maintenance.lock")
 
-# 默认模型（可通过环境变量 GEMINI_MODEL 自定义）
-DEFAULT_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.1-flash-image-preview")
-SESSIONS_DIR = "data/sessions"  # 改为目录，每个用户一个文件
-IMAGES_DIR = "static/images"
-THUMBNAILS_DIR = "static/thumbnails"
-
-# 安全配置常量
-ALLOWED_ASPECT_RATIOS = ["auto", "1:1", "16:9", "9:16", "4:3", "3:4", "21:9", "3:2", "2:3"]
-ALLOWED_IMAGE_SIZES = ["1K", "2K", "4K"]
-ALLOWED_MODELS = {
-    "gemini-3-pro-image-preview": "Nano Banana Pro",
-    "gemini-3.1-flash-image-preview": "Nano Banana 2",
+# 官方模型能力矩阵（https://ai.google.dev/gemini-api/docs/image-generation）。
+# 前端选项、请求验证与后台定价均从这一处派生，避免规则漂移。
+COMMON_RATIOS = ["1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9"]
+MODEL_CAPABILITIES = {
+    "gemini-3.1-flash-lite-image": {
+        "name": "Nano Banana 2 Lite", "sizes": ["1K"], "ratios": COMMON_RATIOS, "max_references": 14,
+    },
+    "gemini-3.1-flash-image": {
+        "name": "Nano Banana 2", "sizes": ["512", "1K", "2K", "4K"],
+        "ratios": ["1:1", "1:4", "1:8", "2:3", "3:2", "3:4", "4:1", "4:3", "4:5", "5:4", "8:1", "9:16", "16:9", "21:9"],
+        "max_references": 14,
+    },
+    "gemini-3-pro-image": {
+        "name": "Nano Banana Pro", "sizes": ["1K", "2K", "4K"], "ratios": COMMON_RATIOS, "max_references": 14,
+    },
+    "gemini-2.5-flash-image": {
+        "name": "Nano Banana", "sizes": ["1K"], "ratios": COMMON_RATIOS, "max_references": 3,
+    },
 }
+ALLOWED_MODELS = {model_id: config["name"] for model_id, config in MODEL_CAPABILITIES.items()}
+DEFAULT_PRICES = {"512": 1, "1K": 1, "2K": 2, "4K": 4}
 MAX_PROMPT_LENGTH = 100000  # 支持长提示词
 MAX_REFERENCE_IMAGES = 14
+MAX_REFERENCE_IMAGE_BYTES = int(os.getenv("MAX_REFERENCE_IMAGE_BYTES", 10 * 1024 * 1024))
+MAX_REFERENCE_TOTAL_BYTES = int(os.getenv("MAX_REFERENCE_TOTAL_BYTES", 35 * 1024 * 1024))
+MAX_REFERENCE_PIXELS = int(os.getenv("MAX_REFERENCE_PIXELS", 40_000_000))
+GENERATION_CHARGE_TTL_SECONDS = max(
+    600, int(os.getenv("GENERATION_CHARGE_TTL_SECONDS", "900"))
+)
 ALLOWED_IMAGE_EXTENSIONS = {'.png', '.jpg', '.jpeg', '.gif', '.webp', '.ico'}
+REFERENCE_FORMATS = {
+    "PNG": ("image/png", ".png"),
+    "JPEG": ("image/jpeg", ".jpg"),
+    "GIF": ("image/gif", ".gif"),
+    "WEBP": ("image/webp", ".webp"),
+    "ICO": ("image/x-icon", ".ico"),
+}
 
 # 确保目录存在
-os.makedirs("data", exist_ok=True)
+os.makedirs(DATA_DIR, exist_ok=True)
 os.makedirs(SESSIONS_DIR, exist_ok=True)
 os.makedirs(IMAGES_DIR, exist_ok=True)
 os.makedirs(THUMBNAILS_DIR, exist_ok=True)
@@ -136,18 +222,102 @@ def inject_version():
     """向所有模板注入版本号，用于静态文件缓存刷新"""
     return {"v": APP_VERSION}
 
-# Gemini 客户端（增加超时时间以支持长提示词）
-# 如果配置了自定义 API 端点，则使用自定义端点
-_http_kwargs = {"timeout": 300000}  # 300秒超时（毫秒）
-if API_BASE_URL:
-    _http_kwargs["base_url"] = API_BASE_URL
-    logger.info(f"使用自定义 API 端点: {API_BASE_URL}")
-http_options = types.HttpOptions(**_http_kwargs)
+# ========================================
+# Gemini 客户端（动态配置，支持多种 Provider）
+# ========================================
 
-client = genai.Client(
-    api_key=API_KEY,
-    http_options=http_options
-)
+def _build_genai_client(provider, api_key, custom_base_url=None):
+    """根据 provider 类型构建 genai.Client 实例"""
+    http_options = types.HttpOptions(timeout=300000)  # 300秒超时
+
+    if provider == 'custom':
+        logger.info(f"使用自定义 API 端点: {custom_base_url}")
+        http_options = types.HttpOptions(timeout=300000, base_url=custom_base_url)
+        return genai.Client(api_key=api_key, http_options=http_options)
+    else:  # google_ai（默认）
+        logger.info("使用 Google AI Studio 模式")
+        return genai.Client(api_key=api_key, http_options=http_options)
+
+
+def _resolve_client_settings():
+    """返回当前客户端配置及跨 worker 可比较的版本签名。"""
+    db_settings = get_active_api_settings()
+    if db_settings:
+        settings = {
+            "provider": db_settings["provider"],
+            "api_key": db_settings["api_key"],
+            "custom_base_url": db_settings.get("custom_base_url"),
+        }
+        signature = (
+            "db",
+            db_settings.get("id"),
+            db_settings.get("updated_at"),
+            settings["provider"],
+            settings["custom_base_url"],
+        )
+        return settings, signature
+
+    env_api_key = os.getenv("GEMINI_API_KEY")
+    env_base_url = os.getenv("GEMINI_API_BASE_URL")
+    if env_api_key:
+        provider = 'custom' if env_base_url else 'google_ai'
+        settings = {
+            "provider": provider,
+            "api_key": env_api_key,
+            "custom_base_url": env_base_url,
+        }
+        return settings, ("env", provider, env_api_key, env_base_url)
+
+    return None, None
+
+
+def _init_client():
+    """按数据库优先、环境变量回退的顺序初始化 Gemini 客户端。"""
+    settings, signature = _resolve_client_settings()
+    if settings:
+        source = "数据库" if signature[0] == "db" else "环境变量"
+        logger.info(f"从{source}加载 API 设置 (provider: {settings['provider']})")
+        return (
+            _build_genai_client(
+                settings["provider"],
+                settings["api_key"],
+                settings["custom_base_url"],
+            ),
+            signature,
+        )
+
+    logger.warning("⚠️ 未找到 API 配置！请在管理员后台设置 API Key，或在 .env 文件中配置 GEMINI_API_KEY")
+    return None, None
+
+
+client_lock = threading.Lock()  # 客户端重建时的线程安全锁
+client, client_config_signature = _init_client()
+
+
+def reload_client():
+    """重建 Gemini 客户端（管理员更改 API 设置后调用）"""
+    global client, client_config_signature
+    with client_lock:
+        new_client, new_signature = _init_client()
+        if new_client:
+            client = new_client
+            client_config_signature = new_signature
+            # 清除所有活跃聊天会话（client 变了，旧的 chat 对象不可用）
+            with active_chats_lock:
+                count = len(active_chats)
+                active_chats.clear()
+            logger.info(f"Gemini 客户端已重建，已清除 {count} 个活跃会话")
+            return True
+        return False
+
+
+def ensure_client_current():
+    """在每次生成前检测数据库版本，确保所有 worker 最终使用同一配置。"""
+    global client, client_config_signature
+    _, current_signature = _resolve_client_settings()
+    if current_signature == client_config_signature:
+        return client is not None
+    return reload_client()
 
 # 存储活跃的聊天会话（内存中）
 active_chats = {}
@@ -179,24 +349,45 @@ def cleanup_inactive_chats():
                     logger.info(f"已清理 {deleted} 条过期验证码")
             except Exception as e:
                 logger.error(f"清理过期验证码失败: {e}")
+            reconcile_charges = globals().get("reconcile_stale_generation_charges")
+            if reconcile_charges:
+                try:
+                    resolved = reconcile_charges()
+                    if resolved:
+                        logger.info(f"已对账 {resolved} 笔过期生成扣费")
+                except Exception as e:
+                    logger.error(f"生成扣费后台对账失败: {e}")
         except Exception as e:
             logger.error(f"清理线程错误: {e}")
             time.sleep(60)  # 错误后等待60秒再重试，避免循环崩溃
 
-cleanup_thread = threading.Thread(target=cleanup_inactive_chats, daemon=True)
-cleanup_thread.start()
-logger.info(f"会话自动清理已启动（闲置超时: {CHAT_IDLE_TIMEOUT}s, 检查间隔: {CHAT_CLEANUP_INTERVAL}s）")
+cleanup_thread = None
+if os.getenv("DISABLE_BACKGROUND_TASKS", "false").lower() != "true":
+    cleanup_thread = threading.Thread(target=cleanup_inactive_chats, daemon=True)
+    cleanup_thread.start()
+    logger.info(f"会话自动清理已启动（闲置超时: {CHAT_IDLE_TIMEOUT}s, 检查间隔: {CHAT_CLEANUP_INTERVAL}s）")
+
+
+def _clear_authentication_session():
+    """移除登录状态，但保留 CSRF token 等非认证 session 数据。"""
+    for key in ("user_id", "username", "is_admin"):
+        session.pop(key, None)
 
 
 def login_required(f):
     """登录验证装饰器"""
     @wraps(f)
     def decorated_function(*args, **kwargs):
-        if "user_id" not in session:
+        user_id = session.get("user_id")
+        user = get_user_by_id(user_id) if user_id is not None else None
+        if user is None:
+            _clear_authentication_session()
             # 如果是 API 请求，返回 JSON 错误
             if request.path.startswith("/api/"):
                 return jsonify({"error": "请先登录"}), 401
             return redirect(url_for("login"))
+        session["username"] = user["username"]
+        session["is_admin"] = user["is_admin"]
         return f(*args, **kwargs)
     return decorated_function
 
@@ -205,11 +396,16 @@ def admin_required(f):
     """管理员权限验证装饰器"""
     @wraps(f)
     def decorated_function(*args, **kwargs):
-        if "user_id" not in session:
+        user_id = session.get("user_id")
+        user = get_user_by_id(user_id) if user_id is not None else None
+        if user is None:
+            _clear_authentication_session()
             if request.path.startswith("/api/"):
                 return jsonify({"error": "请先登录"}), 401
             return redirect(url_for("login"))
-        if not session.get("is_admin"):
+        session["username"] = user["username"]
+        session["is_admin"] = user["is_admin"]
+        if not user["is_admin"]:
             if request.path.startswith("/api/"):
                 return jsonify({"error": "需要管理员权限"}), 403
             return redirect(url_for("index"))
@@ -229,43 +425,69 @@ def _get_session_lock(user_id):
     return FileLock(sessions_file + ".lock", timeout=10)
 
 
+def _get_generation_lock(session_id):
+    """跨线程、跨 worker 串行化同一聊天会话的生成请求。"""
+    return FileLock(
+        os.path.join(SESSIONS_DIR, f".chat_{session_id}.lock"),
+        timeout=int(os.getenv("GENERATION_LOCK_TIMEOUT", "330")),
+    )
+
+
+def _get_maintenance_lock():
+    """协调文件落盘与管理员孤儿文件清理。"""
+    return FileLock(MAINTENANCE_LOCK_FILE, timeout=30)
+
+
+def _load_sessions_unlocked(user_id):
+    """调用方持有用户锁时读取会话文件。"""
+    sessions_file = get_user_sessions_file(user_id)
+    if not os.path.exists(sessions_file):
+        return {}
+    try:
+        with open(sessions_file, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            return data if isinstance(data, dict) else {}
+    except (json.JSONDecodeError, ValueError) as e:
+        logger.error(f"会话文件损坏 (user {user_id}): {e}")
+        backup_file = f"{sessions_file}.corrupt.{int(time.time())}"
+        try:
+            import shutil
+            shutil.copy2(sessions_file, backup_file)
+            logger.info(f"已备份损坏的会话文件到: {backup_file}")
+        except Exception as backup_error:
+            logger.error(f"备份失败: {backup_error}")
+        try:
+            os.remove(sessions_file)
+        except Exception as remove_error:
+            logger.error(f"删除损坏文件失败: {remove_error}")
+        return {}
+
+
+def _save_sessions_unlocked(user_id, sessions):
+    """调用方持有用户锁时原子写入会话文件。"""
+    sessions_file = get_user_sessions_file(user_id)
+    tmp_file = f"{sessions_file}.{uuid.uuid4().hex}.tmp"
+    try:
+        with open(tmp_file, "w", encoding="utf-8") as f:
+            json.dump(sessions, f, ensure_ascii=False, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_file, sessions_file)
+    finally:
+        if os.path.exists(tmp_file):
+            os.remove(tmp_file)
+
+
 def load_sessions(user_id):
     """加载指定用户的会话数据（带文件锁防止并发问题）"""
-    sessions_file = get_user_sessions_file(user_id)
-    lock = _get_session_lock(user_id)
-    with lock:
-        if os.path.exists(sessions_file):
-            try:
-                with open(sessions_file, "r", encoding="utf-8") as f:
-                    return json.load(f)
-            except (json.JSONDecodeError, ValueError) as e:
-                # JSON 文件损坏，备份并返回空数据
-                logger.error(f"会话文件损坏 (user {user_id}): {e}")
-                backup_file = f"{sessions_file}.corrupt.{int(time.time())}"
-                try:
-                    import shutil
-                    shutil.copy2(sessions_file, backup_file)
-                    logger.info(f"已备份损坏的会话文件到: {backup_file}")
-                except Exception as backup_error:
-                    logger.error(f"备份失败: {backup_error}")
-                # 删除损坏的文件，让系统重新开始
-                try:
-                    os.remove(sessions_file)
-                except Exception as remove_error:
-                    logger.error(f"删除损坏文件失败: {remove_error}")
-                return {}
-    return {}
+    with _get_session_lock(user_id):
+        return _load_sessions_unlocked(user_id)
 
 
 def save_sessions(user_id, sessions):
     """保存指定用户的会话数据（原子写入 + 文件锁，防止并发和文件损坏）"""
-    sessions_file = get_user_sessions_file(user_id)
-    lock = _get_session_lock(user_id)
-    with lock:
-        tmp_file = sessions_file + ".tmp"
-        with open(tmp_file, "w", encoding="utf-8") as f:
-            json.dump(sessions, f, ensure_ascii=False, indent=2)
-        os.replace(tmp_file, sessions_file)
+    with _get_session_lock(user_id):
+        _save_sessions_unlocked(user_id, sessions)
 
 
 def _delete_message_files(msg):
@@ -298,9 +520,10 @@ def _delete_message_files(msg):
 
 
 def _get_json_data():
-    """安全获取请求 JSON 数据，如果不是有效 JSON 返回 None"""
+    """安全获取 JSON 对象；数组、标量和无效 JSON 均按空对象处理。"""
     try:
-        return request.get_json(silent=True) or {}
+        data = request.get_json(silent=True)
+        return data if isinstance(data, dict) else {}
     except Exception:
         return {}
 
@@ -325,6 +548,7 @@ def create_thumbnail(image_path, thumbnail_filename, max_size=400, quality=60):
     Returns:
         缩略图的URL路径
     """
+    thumbnail_path = os.path.join(THUMBNAILS_DIR, thumbnail_filename)
     try:
         with Image.open(image_path) as img:
             # 转换为RGB模式（如果是RGBA等）
@@ -338,11 +562,15 @@ def create_thumbnail(image_path, thumbnail_filename, max_size=400, quality=60):
                 img = img.resize(new_size, Image.Resampling.LANCZOS)
             
             # 保存为JPEG格式以获得更好的压缩
-            thumbnail_path = os.path.join(THUMBNAILS_DIR, thumbnail_filename)
             img.save(thumbnail_path, 'JPEG', quality=quality, optimize=True)
             
             return f"/static/thumbnails/{thumbnail_filename}"
     except Exception as e:
+        try:
+            if os.path.exists(thumbnail_path):
+                os.remove(thumbnail_path)
+        except OSError as cleanup_error:
+            logger.warning(f"清理未完成的缩略图失败 {thumbnail_path}: {cleanup_error}")
         logger.warning(f"创建缩略图失败: {e}")
         return None
 
@@ -439,21 +667,24 @@ def rebuild_chat_history(user_id, session_id):
     return history
 
 
-def create_chat(session_id, aspect_ratio="auto", image_size="2K", model=DEFAULT_MODEL, user_id=None):
+def create_chat(
+    session_id,
+    aspect_ratio="auto",
+    image_size="2K",
+    model=None,
+    user_id=None,
+    history_version=None,
+):
     """创建新的聊天实例，如果有历史消息则自动恢复上下文"""
-    if aspect_ratio == "auto":
-        image_config = types.ImageConfig(
-            image_size=image_size,
-        )
-    else:
-        image_config = types.ImageConfig(
-            aspect_ratio=aspect_ratio,
-            image_size=image_size,
-        )
-    
+    model = model or get_default_model()
+    # 本项目使用 Generate Content 的 chats API；response_format 仅属于
+    # Interactions API，不能传给 GenerateContentConfig。
+    image_config = types.ImageConfig(image_size=image_size)
+    if aspect_ratio != "auto":
+        image_config.aspect_ratio = aspect_ratio
     config = types.GenerateContentConfig(
         response_modalities=['TEXT', 'IMAGE'],
-        image_config=image_config
+        image_config=image_config,
     )
     
     # 从保存的消息历史重建 Chat 上下文
@@ -474,13 +705,22 @@ def create_chat(session_id, aspect_ratio="auto", image_size="2K", model=DEFAULT_
             "aspect_ratio": aspect_ratio,
             "image_size": image_size,
             "model": model,
+            "history_version": history_version,
             "last_access": time.time()
         }
     return chat
 
 
-def get_or_create_chat(session_id, aspect_ratio="auto", image_size="2K", model=DEFAULT_MODEL, user_id=None):
+def get_or_create_chat(
+    session_id,
+    aspect_ratio="auto",
+    image_size="2K",
+    model=None,
+    user_id=None,
+    history_version=None,
+):
     """获取或创建聊天实例"""
+    model = model or get_default_model()
     with active_chats_lock:
         if session_id in active_chats:
             chat_data = active_chats[session_id]
@@ -488,11 +728,19 @@ def get_or_create_chat(session_id, aspect_ratio="auto", image_size="2K", model=D
             # 如果配置变了，重新创建
             if (chat_data["aspect_ratio"] != aspect_ratio or 
                 chat_data["image_size"] != image_size or 
-                chat_data.get("model") != model):
+                chat_data.get("model") != model or
+                chat_data.get("history_version") != history_version):
                 pass  # 需要重建，退出锁后处理
             else:
                 return chat_data["chat"]
-    return create_chat(session_id, aspect_ratio, image_size, model, user_id)
+    return create_chat(
+        session_id,
+        aspect_ratio,
+        image_size,
+        model,
+        user_id,
+        history_version,
+    )
 
 
 @app.route("/")
@@ -501,18 +749,26 @@ def index():
     user = None
     if "user_id" in session:
         user = get_user_by_id(session["user_id"])
-    return render_template("index.html", user=user, default_model=DEFAULT_MODEL)
+        if user is None:
+            _clear_authentication_session()
+    return render_template("index.html", user=user, default_model=get_default_model())
 
 
 @app.route("/api/models", methods=["GET"])
-@csrf.exempt
 def get_models():
     """获取可用的图像生成模型列表"""
-    models = [
-        {"id": model_id, "name": name, "default": model_id == DEFAULT_MODEL}
-        for model_id, name in ALLOWED_MODELS.items()
-    ]
-    return jsonify({"models": models, "default": DEFAULT_MODEL})
+    default_model = get_default_model()
+    pricing = get_model_pricing()
+    models = [{
+        "id": model_id,
+        "name": config["name"],
+        "default": model_id == default_model,
+        "sizes": [{"id": size, "credits": pricing.get((model_id, size), DEFAULT_PRICES[size])}
+                  for size in config["sizes"]],
+        "ratios": config["ratios"],
+        "max_references": config["max_references"],
+    } for model_id, config in MODEL_CAPABILITIES.items()]
+    return jsonify({"models": models, "default": default_model})
 
 
 @app.route("/login")
@@ -525,12 +781,15 @@ def login():
 
 @app.route("/api/login", methods=["POST"])
 @limiter.limit("5 per minute")  # 防止暴力破解
-@csrf.exempt  # API端点不需要CSRF（使用JSON）
 def api_login():
     """登录接口"""
     data = _get_json_data()
     username = data.get("username", "")
     password = data.get("password", "")
+    if not isinstance(username, str) or not isinstance(password, str):
+        return jsonify({"error": "用户名或密码错误"}), 400
+    if len(username) > 64 or len(password) > 256:
+        return jsonify({"error": "用户名或密码错误"}), 400
     
     success, message, user = verify_user(username, password)
     
@@ -545,14 +804,18 @@ def api_login():
 
 @app.route("/api/send-verification-code", methods=["POST"])
 @limiter.limit("1 per minute")  # 防止滥用
-@csrf.exempt
 def send_verification_code_route():
     """发送邮箱验证码"""
     data = _get_json_data()
-    email = data.get("email", "").strip()
+    email_value = data.get("email", "")
+    if not isinstance(email_value, str):
+        return jsonify({"error": "error_invalid_email"}), 400
+    email = email_value.strip()
     
     if not email:
         return jsonify({"error": "error_email_required"}), 400
+    if len(email) > 254:
+        return jsonify({"error": "error_invalid_email"}), 400
     
     # 验证邮箱格式
     email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
@@ -576,31 +839,39 @@ def send_verification_code_route():
     if success:
         return jsonify({"success": True, "message": message})
     else:
+        try:
+            delete_verification_code(email, code_hash)
+        except Exception as exc:
+            logger.error(f"回滚发送失败的验证码记录时出错: {exc}")
         return jsonify({"error": message}), 500
 
 
 @app.route("/api/register", methods=["POST"])
 @limiter.limit("3 per hour")  # 防止批量注册
-@csrf.exempt
 def api_register():
     """注册接口"""
     data = _get_json_data()
     username = data.get("username", "")
-    email = data.get("email", "").strip()
+    email_value = data.get("email", "")
     password = data.get("password", "")
-    verification_code = data.get("verification_code", "").strip()
+    verification_code_value = data.get("verification_code", "")
+    if not isinstance(email_value, str) or not isinstance(verification_code_value, str):
+        return jsonify({"error": "邮箱或验证码格式无效"}), 400
+    email = email_value.strip()
+    verification_code = verification_code_value.strip()
     
     # 验证邮箱和验证码
     if not email or not verification_code:
         return jsonify({"error": "请输入邮箱和验证码"}), 400
+    if len(email) > 254 or len(verification_code) != 6 or not verification_code.isdigit():
+        return jsonify({"error": "邮箱或验证码格式无效"}), 400
     
-    # 验证验证码
-    code_success, code_message = verify_email_code(email, verification_code)
-    if not code_success:
-        return jsonify({"error": code_message}), 400
-    
-    # 创建用户
-    success, message, user_id = create_user(username, password, email)
+    success, message, user_id = register_user_with_verification_code(
+        username,
+        password,
+        email,
+        verification_code,
+    )
     
     if success:
         return jsonify({"success": True, "message": message})
@@ -608,7 +879,7 @@ def api_register():
         return jsonify({"error": message}), 400
 
 
-@app.route("/api/logout", methods=["GET", "POST"])
+@app.route("/api/logout", methods=["POST"])
 @login_required
 def api_logout():
     """登出接口"""
@@ -618,7 +889,6 @@ def api_logout():
 
 @app.route("/api/sessions", methods=["GET"])
 @login_required
-@csrf.exempt
 def get_sessions():
     """获取当前用户的所有会话列表"""
     user_id = session["user_id"]
@@ -639,21 +909,24 @@ def get_sessions():
 
 @app.route("/api/sessions", methods=["POST"])
 @login_required
-@csrf.exempt
 def create_session_route():
     """创建新会话"""
     user_id = session["user_id"]
-    sessions = load_sessions(user_id)
     session_id = str(uuid.uuid4())
     now = datetime.now().isoformat()
-    sessions[session_id] = {
-        "title": "新对话",
-        "created_at": now,
-        "updated_at": now,
-        "messages": [],
-        "settings": None  # 首次生成后会锁定分辨率和纵横比
-    }
-    save_sessions(user_id, sessions)
+    with _get_session_lock(user_id):
+        if get_user_by_id(user_id) is None:
+            _clear_authentication_session()
+            return jsonify({"error": "请先登录"}), 401
+        sessions = _load_sessions_unlocked(user_id)
+        sessions[session_id] = {
+            "title": "新对话",
+            "created_at": now,
+            "updated_at": now,
+            "messages": [],
+            "settings": None
+        }
+        _save_sessions_unlocked(user_id, sessions)
     return jsonify({
         "id": session_id,
         "title": "新对话",
@@ -665,7 +938,6 @@ def create_session_route():
 
 @app.route("/api/sessions/<session_id>", methods=["GET"])
 @login_required
-@csrf.exempt
 def get_session_route(session_id):
     """获取单个会话详情"""
     if not _validate_session_id(session_id):
@@ -679,7 +951,12 @@ def get_session_route(session_id):
     # 过滤掉 thought_signature，前端不需要，避免传输大量数据
     filtered_messages = []
     for msg in session_data.get("messages", []):
-        filtered_msg = {k: v for k, v in msg.items() if k not in ("thought_signature", "text_thought_signature")}
+        filtered_msg = {
+            k: v for k, v in msg.items()
+            if k not in (
+                "thought_signature", "text_thought_signature", "generation_charge_id",
+            )
+        }
         filtered_messages.append(filtered_msg)
 
     return jsonify({
@@ -694,41 +971,48 @@ def get_session_route(session_id):
 
 @app.route("/api/sessions/<session_id>", methods=["DELETE"])
 @login_required
-@csrf.exempt
 def delete_session_route(session_id):
     """删除会话"""
     if not _validate_session_id(session_id):
         return jsonify({"error": "无效的会话ID"}), 400
     user_id = session["user_id"]
-    sessions = load_sessions(user_id)
-    if session_id in sessions:
-        # 删除相关图片、缩略图和参考图片
-        for msg in sessions[session_id].get("messages", []):
-            _delete_message_files(msg)
-        del sessions[session_id]
-        save_sessions(user_id, sessions)
-        # 清除活跃聊天
-        with active_chats_lock:
-            if session_id in active_chats:
-                del active_chats[session_id]
+    deleted_messages = []
+    with _get_generation_lock(session_id):
+        with _get_maintenance_lock():
+            with _get_session_lock(user_id):
+                sessions = _load_sessions_unlocked(user_id)
+                if session_id in sessions:
+                    deleted_messages = sessions[session_id].get("messages", [])
+                    del sessions[session_id]
+                    _save_sessions_unlocked(user_id, sessions)
+            for msg in deleted_messages:
+                _delete_message_files(msg)
+            with active_chats_lock:
+                active_chats.pop(session_id, None)
     return jsonify({"success": True})
 
 
 @app.route("/api/sessions/<session_id>/title", methods=["PUT"])
 @login_required
-@csrf.exempt
 def update_session_title(session_id):
     """更新会话标题"""
     if not _validate_session_id(session_id):
         return jsonify({"error": "无效的会话ID"}), 400
     user_id = session["user_id"]
-    sessions = load_sessions(user_id)
-    if session_id not in sessions:
-        return jsonify({"error": "会话不存在"}), 404
     data = _get_json_data()
-    sessions[session_id]["title"] = data.get("title", "新对话")
-    sessions[session_id]["updated_at"] = datetime.now().isoformat()
-    save_sessions(user_id, sessions)
+    title = data.get("title", "新对话")
+    if not isinstance(title, str) or not title.strip() or len(title) > 200:
+        return jsonify({"error": "标题必须为 1 到 200 个字符"}), 400
+    with _get_session_lock(user_id):
+        if get_user_by_id(user_id) is None:
+            _clear_authentication_session()
+            return jsonify({"error": "请先登录"}), 401
+        sessions = _load_sessions_unlocked(user_id)
+        if session_id not in sessions:
+            return jsonify({"error": "会话不存在"}), 404
+        sessions[session_id]["title"] = title.strip()
+        sessions[session_id]["updated_at"] = datetime.now().isoformat()
+        _save_sessions_unlocked(user_id, sessions)
     return jsonify({"success": True})
 
 
@@ -740,49 +1024,104 @@ def _validate_generate_params(data):
     prompt = data.get("prompt", "")
     aspect_ratio = data.get("aspect_ratio", "auto")
     image_size = data.get("image_size", "2K")
-    model = data.get("model", DEFAULT_MODEL)
+    model = data.get("model") or get_default_model()
     reference_images = data.get("reference_images", [])
 
-    if not session_id or not prompt:
+    if not isinstance(session_id, str) or not session_id or not isinstance(prompt, str) or not prompt:
         return jsonify({"error": "缺少必要参数"}), 400
-    if aspect_ratio not in ALLOWED_ASPECT_RATIOS:
-        return jsonify({"error": "无效的纵横比参数"}), 400
-    if image_size not in ALLOWED_IMAGE_SIZES:
-        return jsonify({"error": "无效的分辨率参数"}), 400
-    if model not in ALLOWED_MODELS:
+    if not isinstance(model, str) or model not in ALLOWED_MODELS:
         return jsonify({"error": "无效的模型参数"}), 400
+    if not isinstance(aspect_ratio, str):
+        return jsonify({"error": "无效的纵横比参数"}), 400
+    if not isinstance(image_size, str):
+        return jsonify({"error": "无效的分辨率参数"}), 400
+    if not isinstance(reference_images, list) or any(not isinstance(image, str) for image in reference_images):
+        return jsonify({"error": "参考图片参数格式无效"}), 400
+    capabilities = MODEL_CAPABILITIES[model]
+    # auto 只用于兼容历史会话；新界面只会提交模型明确支持的比例。
+    if aspect_ratio != "auto" and aspect_ratio not in capabilities["ratios"]:
+        return jsonify({"error": f"{capabilities['name']} 不支持该纵横比"}), 400
+    if image_size not in capabilities["sizes"]:
+        return jsonify({"error": f"{capabilities['name']} 不支持 {image_size} 分辨率"}), 400
     if len(prompt.strip()) == 0:
         return jsonify({"error": "提示词不能为空"}), 400
     if len(prompt) > MAX_PROMPT_LENGTH:
         return jsonify({"error": f"提示词过长，最多{MAX_PROMPT_LENGTH}字符"}), 400
-    if len(reference_images) > MAX_REFERENCE_IMAGES:
-        return jsonify({"error": f"参考图片过多，最多{MAX_REFERENCE_IMAGES}张"}), 400
+    if len(reference_images) > capabilities["max_references"]:
+        return jsonify({"error": f"{capabilities['name']} 最多支持 {capabilities['max_references']} 张参考图"}), 400
+    max_encoded_size = (MAX_REFERENCE_IMAGE_BYTES * 4 // 3) + 1024
+    if any(len(image) > max_encoded_size for image in reference_images):
+        return jsonify({"error": f"单张参考图片不能超过 {MAX_REFERENCE_IMAGE_BYTES // (1024 * 1024)} MB"}), 400
     return None
 
 
+class ReferenceImageError(ValueError):
+    pass
+
+
 def _process_reference_images(reference_images, session_id, message_index):
-    """处理参考图片：解码 base64、保存文件、构建 API parts"""
+    """校验并解码参考图；成功生成后再统一落盘。"""
     contents = []
-    saved_ref_images = []
+    decoded_images = []
+    total_bytes = 0
     for i, ref_image in enumerate(reference_images):
-        if ref_image:
-            image_data = ref_image
-            mime_type = "image/png"
-            if "," in image_data:
-                header = image_data.split(",")[0]
-                if header.startswith("data:") and ";" in header:
-                    mime_type = header[5:header.index(";")]
-                image_data = image_data.split(",")[1]
-            contents.append(types.Part.from_bytes(
-                data=base64.b64decode(image_data),
-                mime_type=mime_type
-            ))
-            ref_filename = f"ref_{session_id}_{message_index}_{i}.png"
-            ref_path = os.path.join(IMAGES_DIR, ref_filename)
-            with open(ref_path, "wb") as f:
-                f.write(base64.b64decode(image_data))
-            saved_ref_images.append(ref_filename)
-    return contents, saved_ref_images
+        if not ref_image:
+            continue
+        image_data = ref_image
+        if "," in image_data:
+            header, image_data = image_data.split(",", 1)
+            if not header.startswith("data:image/") or ";base64" not in header.lower():
+                raise ReferenceImageError("参考图片 Data URL 格式无效")
+        try:
+            decoded = base64.b64decode(image_data, validate=True)
+        except (binascii.Error, ValueError) as exc:
+            raise ReferenceImageError("参考图片 Base64 数据无效") from exc
+        if not decoded or len(decoded) > MAX_REFERENCE_IMAGE_BYTES:
+            raise ReferenceImageError(
+                f"单张参考图片不能超过 {MAX_REFERENCE_IMAGE_BYTES // (1024 * 1024)} MB"
+            )
+        total_bytes += len(decoded)
+        if total_bytes > MAX_REFERENCE_TOTAL_BYTES:
+            raise ReferenceImageError(
+                f"参考图片总大小不能超过 {MAX_REFERENCE_TOTAL_BYTES // (1024 * 1024)} MB"
+            )
+        try:
+            with Image.open(io.BytesIO(decoded)) as image:
+                image_format = image.format
+                if image.width * image.height > MAX_REFERENCE_PIXELS:
+                    raise ReferenceImageError("参考图片像素尺寸过大")
+                image.verify()
+        except ReferenceImageError:
+            raise
+        except Exception as exc:
+            raise ReferenceImageError("参考图片不是有效或受支持的图片文件") from exc
+        if image_format not in REFERENCE_FORMATS:
+            raise ReferenceImageError("参考图片格式不受支持")
+        mime_type, extension = REFERENCE_FORMATS[image_format]
+        filename = (
+            f"ref_{session_id}_{message_index}_{i}_{uuid.uuid4().hex[:10]}{extension}"
+        )
+        contents.append(types.Part.from_bytes(data=decoded, mime_type=mime_type))
+        decoded_images.append({"filename": filename, "data": decoded})
+    return contents, decoded_images
+
+
+def _save_reference_images(decoded_images):
+    filenames = []
+    try:
+        for item in decoded_images:
+            path = os.path.join(IMAGES_DIR, item["filename"])
+            with open(path, "xb") as f:
+                f.write(item["data"])
+            filenames.append(item["filename"])
+        return filenames
+    except Exception:
+        for filename in filenames:
+            try:
+                os.remove(os.path.join(IMAGES_DIR, filename))
+            except OSError:
+                pass
+        raise
 
 
 def _process_gemini_response(response, session_id):
@@ -795,32 +1134,45 @@ def _process_gemini_response(response, session_id):
     result_thumbnail = None
     image_thought_signature = None
     text_thought_signature = None
+    created_files = []
 
-    for part in response.parts:
-        if part.text is not None:
-            result_text += part.text
-            # 提取文本部分的 thought_signature
-            if hasattr(part, 'thought_signature') and part.thought_signature:
-                if isinstance(part.thought_signature, bytes):
-                    text_thought_signature = base64.b64encode(part.thought_signature).decode('utf-8')
-                else:
-                    text_thought_signature = part.thought_signature
-        elif part.inline_data is not None and result_image is None:
-            image_filename = f"{session_id}_{datetime.now().strftime('%Y%m%d%H%M%S%f')}.png"
-            image_path = os.path.join(IMAGES_DIR, image_filename)
+    try:
+        for part in response.parts:
+            if part.text is not None:
+                result_text += part.text
+                # 提取文本部分的 thought_signature
+                if hasattr(part, 'thought_signature') and part.thought_signature:
+                    if isinstance(part.thought_signature, bytes):
+                        text_thought_signature = base64.b64encode(part.thought_signature).decode('utf-8')
+                    else:
+                        text_thought_signature = part.thought_signature
+            elif part.inline_data is not None and result_image is None:
+                image_filename = f"{session_id}_{datetime.now().strftime('%Y%m%d%H%M%S%f')}.png"
+                image_path = os.path.join(IMAGES_DIR, image_filename)
+                created_files.append(image_path)
 
-            image = part.as_image()
-            image.save(image_path)
-            result_image = f"/static/images/{image_filename}"
+                image = part.as_image()
+                image.save(image_path)
+                result_image = f"/static/images/{image_filename}"
 
-            if hasattr(part, 'thought_signature') and part.thought_signature:
-                if isinstance(part.thought_signature, bytes):
-                    image_thought_signature = base64.b64encode(part.thought_signature).decode('utf-8')
-                else:
-                    image_thought_signature = part.thought_signature
+                if hasattr(part, 'thought_signature') and part.thought_signature:
+                    if isinstance(part.thought_signature, bytes):
+                        image_thought_signature = base64.b64encode(part.thought_signature).decode('utf-8')
+                    else:
+                        image_thought_signature = part.thought_signature
 
-            thumbnail_filename = f"thumb_{image_filename.replace('.png', '.jpg')}"
-            result_thumbnail = create_thumbnail(image_path, thumbnail_filename)
+                thumbnail_filename = f"thumb_{image_filename.replace('.png', '.jpg')}"
+                result_thumbnail = create_thumbnail(image_path, thumbnail_filename)
+                if result_thumbnail:
+                    created_files.append(os.path.join(THUMBNAILS_DIR, thumbnail_filename))
+    except Exception:
+        for created_file in reversed(created_files):
+            try:
+                if os.path.exists(created_file):
+                    os.remove(created_file)
+            except OSError as cleanup_error:
+                logger.warning(f"清理未完成的生成文件失败 {created_file}: {cleanup_error}")
+        raise
 
     return {
         "text": result_text,
@@ -831,184 +1183,379 @@ def _process_gemini_response(response, session_id):
     }
 
 
+class NoGeneratedImageError(RuntimeError):
+    pass
+
+
+def _history_version(session_data):
+    messages = session_data.get("messages", [])
+    last_timestamp = messages[-1].get("timestamp") if messages else None
+    return len(messages), last_timestamp
+
+
+def _clear_active_chat(session_id):
+    with active_chats_lock:
+        active_chats.pop(session_id, None)
+
+
+def _cleanup_generation_files(result, reference_filenames):
+    for filename in reference_filenames:
+        try:
+            os.remove(os.path.join(IMAGES_DIR, os.path.basename(filename)))
+        except FileNotFoundError:
+            pass
+        except OSError as exc:
+            logger.warning(f"清理失败的参考图片 {filename}: {exc}")
+    if result:
+        _delete_message_files({
+            "image": result.get("image"),
+            "thumbnail": result.get("thumbnail"),
+        })
+
+
+def _resolve_generation_charge_safely(charge_id, refund):
+    if not charge_id:
+        return True
+    try:
+        success, message = resolve_generation_charge(charge_id, refund=refund)
+        if not success:
+            action = "退款" if refund else "提交"
+            logger.error(f"生成扣费 {charge_id} {action}失败: {message}")
+        return success
+    except Exception as exc:
+        # 清理文件和聊天状态不能因为数据库暂时不可用而被跳过。
+        action = "退款" if refund else "提交"
+        logger.error(f"生成扣费 {charge_id} {action}异常: {exc}", exc_info=True)
+        return False
+
+
+def _generation_charge_is_persisted(user_id, charge_id):
+    sessions = load_sessions(user_id)
+    return any(
+        message.get("generation_charge_id") == charge_id
+        for session_data in sessions.values()
+        for message in session_data.get("messages", [])
+    )
+
+
+def reconcile_stale_generation_charges():
+    """将崩溃进程遗留的过期预留按会话落盘结果提交或退款。"""
+    resolved = 0
+    for charge in get_stale_generation_charges(datetime.now().isoformat()):
+        try:
+            persisted = _generation_charge_is_persisted(
+                charge["user_id"], charge["charge_id"]
+            )
+        except Exception as exc:
+            # 读取会话失败时不能贸然退款，否则可能把已成功生成的账单退掉。
+            logger.error(
+                f"读取生成扣费 {charge['charge_id']} 的会话证据失败: {exc}",
+                exc_info=True,
+            )
+            continue
+        if _resolve_generation_charge_safely(
+            charge["charge_id"], refund=not persisted
+        ):
+            resolved += 1
+    return resolved
+
+
+charge_reconciliation_lock = threading.Lock()
+charge_reconciliation_next_at = 0.0
+
+
+@app.before_request
+def reconcile_generation_charges_before_request():
+    """每个 worker 至多每分钟检查一次过期生成预留。"""
+    global charge_reconciliation_next_at
+    now = time.monotonic()
+    if now < charge_reconciliation_next_at:
+        return None
+    if not charge_reconciliation_lock.acquire(blocking=False):
+        return None
+    try:
+        charge_reconciliation_next_at = now + 60
+        resolved = reconcile_stale_generation_charges()
+        if resolved:
+            logger.info(f"已对账 {resolved} 笔过期生成扣费")
+    except Exception as exc:
+        logger.error(f"生成扣费自动对账失败: {exc}", exc_info=True)
+    finally:
+        charge_reconciliation_lock.release()
+    return None
+
+
+def _handle_generation_failure(
+    charge_id,
+    result,
+    reference_filenames,
+    session_id,
+    persisted_to_session,
+):
+    if persisted_to_session:
+        # 会话已原子落盘，不能删除图片或退款；未提交账单会由对账器补交。
+        _resolve_generation_charge_safely(charge_id, refund=False)
+        return
+    _cleanup_generation_files(result, reference_filenames)
+    _clear_active_chat(session_id)
+    _resolve_generation_charge_safely(charge_id, refund=True)
+
+
 @app.route("/api/generate", methods=["POST"])
 @login_required
 @limiter.limit("20 per hour")  # 限制生成频率
-@csrf.exempt
 def generate_image():
     """生成或修改图像"""
     user_id = session["user_id"]
     data = _get_json_data()
-
-    # 1. 验证输入参数
     error = _validate_generate_params(data)
     if error:
         return error
-
     session_id = data.get("session_id")
     if not _validate_session_id(session_id):
         return jsonify({"error": "无效的会话ID"}), 400
+    if not ensure_client_current():
+        return jsonify({"error": "API 未配置，请联系管理员在后台设置 API Key"}), 503
+
     prompt = data.get("prompt", "")
-    aspect_ratio = data.get("aspect_ratio", "auto")
-    image_size = data.get("image_size", "2K")
-    model = data.get("model", DEFAULT_MODEL)
     reference_images = data.get("reference_images", [])
-
-    sessions = load_sessions(user_id)
-    if session_id not in sessions:
-        return jsonify({"error": "会话不存在"}), 404
-
-    # 强制使用会话锁定的设置
-    if sessions[session_id].get("settings"):
-        settings = sessions[session_id]["settings"]
-        aspect_ratio = settings.get("aspect_ratio", aspect_ratio)
-        image_size = settings.get("image_size", image_size)
-        model = settings.get("model", model)
-
-    # 预初始化变量，确保异常处理块中可以安全访问
     cost = 0
-    user = None
+    charge_id = None
+    result = None
+    saved_ref_images = []
+    persisted_to_session = False
 
-    try:
-        # 2. 检查并扣除点数（管理员免消耗）
-        user = get_user_by_id(user_id)
-        credits_after_deduct = user["credits"]  # 记录扣除后的点数
-        if not user.get("is_admin"):
-            cost_map = {"1K": 1, "2K": 2, "4K": 4}
-            cost = cost_map.get(image_size, 2)
+    with _get_generation_lock(session_id):
+        sessions = load_sessions(user_id)
+        if session_id not in sessions:
+            return jsonify({"error": "会话不存在"}), 404
+        session_data = sessions[session_id]
+        aspect_ratio = data.get("aspect_ratio", "auto")
+        image_size = data.get("image_size", "2K")
+        model = data.get("model") or get_default_model()
+        if session_data.get("settings"):
+            settings = session_data["settings"]
+            aspect_ratio = settings.get("aspect_ratio", aspect_ratio)
+            image_size = settings.get("image_size", image_size)
+            model = settings.get("model", model)
+        if (model not in MODEL_CAPABILITIES
+                or image_size not in MODEL_CAPABILITIES[model]["sizes"]
+                or (aspect_ratio != "auto" and aspect_ratio not in MODEL_CAPABILITIES[model]["ratios"])):
+            return jsonify({"error": "该历史会话的模型设置已不再受支持，请新建对话"}), 400
+        if len(reference_images) > MODEL_CAPABILITIES[model]["max_references"]:
+            return jsonify({"error": f"{MODEL_CAPABILITIES[model]['name']} 最多支持 {MODEL_CAPABILITIES[model]['max_references']} 张参考图"}), 400
 
-            if user["credits"] < cost:
-                return jsonify({"error": f"点数不足，本次生成需要 {cost} 点，剩余 {user['credits']} 点。请联系管理员充值。"}), 403
-
-            _, _, credits_after_deduct = update_user_credits(user_id, -cost)
-
-        # 3. 获取或创建聊天实例
-        chat = get_or_create_chat(session_id, aspect_ratio, image_size, model, user_id)
-
-        # 4. 处理参考图片
-        contents, saved_ref_images = _process_reference_images(
-            reference_images, session_id, len(sessions[session_id]['messages'])
-        )
+        expected_history_version = _history_version(session_data)
+        try:
+            contents, decoded_ref_images = _process_reference_images(
+                reference_images,
+                session_id,
+                len(session_data.get("messages", [])),
+            )
+        except ReferenceImageError as exc:
+            return jsonify({"error": str(exc)}), 400
         contents.append(prompt)
 
-        # 5. 调用 Gemini API
-        response = chat.send_message(contents)
+        user = get_user_by_id(user_id)
+        if user is None:
+            _clear_authentication_session()
+            return jsonify({"error": "请先登录"}), 401
+        credits_after_deduct = user["credits"]
+        if not user.get("is_admin"):
+            cost = get_model_pricing().get((model, image_size), DEFAULT_PRICES[image_size])
+            if cost > 0:
+                charge_id = uuid.uuid4().hex
+                expires_at = (
+                    datetime.now() + timedelta(seconds=GENERATION_CHARGE_TTL_SECONDS)
+                ).isoformat()
+                deducted, _, credits_after_deduct = reserve_generation_credits(
+                    user_id, cost, charge_id, expires_at
+                )
+                if not deducted:
+                    return jsonify({"error": f"点数不足，本次生成需要 {cost} 点，剩余 {credits_after_deduct} 点。请联系管理员充值。"}), 403
 
-        # 6. 处理 API 响应
-        result = _process_gemini_response(response, session_id)
-        if result is None:
-            return jsonify({"error": "AI 未返回有效响应，请重试"}), 500
+        try:
+            chat = get_or_create_chat(
+                session_id,
+                aspect_ratio,
+                image_size,
+                model,
+                user_id,
+                expected_history_version,
+            )
+            response = chat.send_message(contents)
 
-        # 7. 保存消息到会话
-        now = datetime.now().isoformat()
+            with _get_maintenance_lock():
+                result = _process_gemini_response(response, session_id)
+                if result is None or not result.get("image"):
+                    raise NoGeneratedImageError("AI 未返回图片，请调整提示词后重试")
+                saved_ref_images = _save_reference_images(decoded_ref_images)
+                now = datetime.now().isoformat()
+                with _get_session_lock(user_id):
+                    current_sessions = _load_sessions_unlocked(user_id)
+                    current_session = current_sessions.get(session_id)
+                    if current_session is None or get_user_by_id(user_id) is None:
+                        raise RuntimeError("会话或用户已在生成期间被删除")
+                    if _history_version(current_session) != expected_history_version:
+                        raise RuntimeError("会话历史已在生成期间发生变化")
+                    current_session["messages"].append({
+                        "role": "user",
+                        "content": prompt,
+                        "reference_images": saved_ref_images or None,
+                        "timestamp": now,
+                    })
+                    current_session["messages"].append({
+                        "role": "assistant",
+                        "content": result["text"],
+                        "image": result["image"],
+                        "thumbnail": result["thumbnail"],
+                        "thought_signature": result["thought_signature"],
+                        "text_thought_signature": result["text_thought_signature"],
+                        "generation_charge_id": charge_id,
+                        "timestamp": now,
+                    })
+                    if len(current_session["messages"]) == 2:
+                        current_session["title"] = prompt[:20] + ("..." if len(prompt) > 20 else "")
+                        current_session["settings"] = {
+                            "aspect_ratio": aspect_ratio,
+                            "image_size": image_size,
+                            "model": model,
+                        }
+                    current_session["updated_at"] = now
+                    _save_sessions_unlocked(user_id, current_sessions)
+                    persisted_to_session = True
+                    session_title = current_session["title"]
+                    session_settings = current_session.get("settings")
+                    new_history_version = _history_version(current_session)
 
-        sessions[session_id]["messages"].append({
-            "role": "user",
-            "content": prompt,
-            "reference_images": saved_ref_images if saved_ref_images else None,
-            "timestamp": now
-        })
+            with active_chats_lock:
+                if session_id in active_chats:
+                    active_chats[session_id]["history_version"] = new_history_version
+            _resolve_generation_charge_safely(charge_id, refund=False)
+            return jsonify({
+                "text": result["text"],
+                "image": result["image"],
+                "thumbnail": result["thumbnail"],
+                "reference_images": saved_ref_images or None,
+                "session_title": session_title,
+                "settings": session_settings,
+                "credits_remaining": credits_after_deduct if not user.get("is_admin") else "admin",
+            })
 
-        sessions[session_id]["messages"].append({
-            "role": "assistant",
-            "content": result["text"],
-            "image": result["image"],
-            "thumbnail": result["thumbnail"] if result["image"] else None,
-            "thought_signature": result["thought_signature"],
-            "text_thought_signature": result["text_thought_signature"],
-            "timestamp": now
-        })
-
-        # 更新会话标题（如果是第一条消息）
-        if len(sessions[session_id]["messages"]) == 2:
-            sessions[session_id]["title"] = prompt[:20] + ("..." if len(prompt) > 20 else "")
-            sessions[session_id]["settings"] = {
-                "aspect_ratio": aspect_ratio,
-                "image_size": image_size,
-                "model": model
-            }
-
-        sessions[session_id]["updated_at"] = now
-        save_sessions(user_id, sessions)
-
-        return jsonify({
-            "text": result["text"],
-            "image": result["image"],
-            "thumbnail": result["thumbnail"],
-            "session_title": sessions[session_id]["title"],
-            "settings": sessions[session_id].get("settings"),
-            "credits_remaining": credits_after_deduct if not user.get("is_admin") else "admin"
-        })
-
-    except genai_errors.ServerError as e:
-        logger.error(f"Image generation server error for user {user_id}: {str(e)}", exc_info=True)
-        # 退还已扣除的点数
-        if cost > 0 and user and not user.get("is_admin"):
-            update_user_credits(user_id, cost)
-        error_str = str(e)
-
-        if "DEADLINE_EXCEEDED" in error_str:
-            return jsonify({"error": "error_timeout", "error_code": "DEADLINE_EXCEEDED"}), 503
-        elif "RESOURCE_EXHAUSTED" in error_str:
-            return jsonify({"error": "error_quota_exceeded", "error_code": "RESOURCE_EXHAUSTED"}), 503
-        elif "UNAVAILABLE" in error_str:
-            return jsonify({"error": "error_service_unavailable", "error_code": "UNAVAILABLE"}), 503
-        else:
+        except NoGeneratedImageError as exc:
+            _handle_generation_failure(
+                charge_id, result, saved_ref_images, session_id, persisted_to_session
+            )
+            return jsonify({"error": str(exc), "error_code": "NO_IMAGE"}), 422
+        except genai_errors.ServerError as exc:
+            _handle_generation_failure(
+                charge_id, result, saved_ref_images, session_id, persisted_to_session
+            )
+            logger.error(f"Image generation server error for user {user_id}: {exc}", exc_info=True)
+            error_str = str(exc)
+            if "DEADLINE_EXCEEDED" in error_str:
+                return jsonify({"error": "error_timeout", "error_code": "DEADLINE_EXCEEDED"}), 503
+            if "RESOURCE_EXHAUSTED" in error_str:
+                return jsonify({"error": "error_quota_exceeded", "error_code": "RESOURCE_EXHAUSTED"}), 503
+            if "UNAVAILABLE" in error_str:
+                return jsonify({"error": "error_service_unavailable", "error_code": "UNAVAILABLE"}), 503
             return jsonify({"error": "error_server_busy", "error_code": "SERVER_ERROR"}), 503
-
-    except genai_errors.ClientError as e:
-        logger.warning(f"Image generation client error for user {user_id}: {str(e)}")
-        # 退还已扣除的点数
-        if cost > 0 and user and not user.get("is_admin"):
-            update_user_credits(user_id, cost)
-        error_str = str(e)
-
-        if "INVALID_ARGUMENT" in error_str:
-            return jsonify({"error": "error_invalid_request", "error_code": "INVALID_ARGUMENT"}), 400
-        elif "PERMISSION_DENIED" in error_str:
-            return jsonify({"error": "error_permission_denied", "error_code": "PERMISSION_DENIED"}), 403
-        else:
+        except genai_errors.ClientError as exc:
+            _handle_generation_failure(
+                charge_id, result, saved_ref_images, session_id, persisted_to_session
+            )
+            logger.warning(f"Image generation client error for user {user_id}: {exc}")
+            error_str = str(exc)
+            if "INVALID_ARGUMENT" in error_str:
+                return jsonify({"error": "error_invalid_request", "error_code": "INVALID_ARGUMENT"}), 400
+            if "PERMISSION_DENIED" in error_str:
+                return jsonify({"error": "error_permission_denied", "error_code": "PERMISSION_DENIED"}), 403
             return jsonify({"error": "error_invalid_input", "error_code": "CLIENT_ERROR"}), 400
-
-    except Exception as e:
-        logger.error(f"Image generation failed for user {user_id}: {str(e)}", exc_info=True)
-        # 退还已扣除的点数
-        if cost > 0 and user and not user.get("is_admin"):
-            update_user_credits(user_id, cost)
-
-        if os.getenv('FLASK_DEBUG', 'False').lower() == 'true':
-            return jsonify({"error": str(e)}), 500
-        else:
+        except Exception as exc:
+            _handle_generation_failure(
+                charge_id, result, saved_ref_images, session_id, persisted_to_session
+            )
+            logger.error(f"Image generation failed for user {user_id}: {exc}", exc_info=True)
             return jsonify({"error": "error_generation_failed", "error_code": "GENERATION_FAILED"}), 500
 
 
-@app.route("/static/images/<filename>")
-def serve_image(filename):
-    """提供图片文件（带路径遍历保护）"""
-    # 安全处理文件名
+def _user_can_access_media(user_id, filename, media_type):
+    user = get_user_by_id(user_id)
+    if user is None:
+        return False
+    if user.get("is_admin"):
+        return True
+    sessions = load_sessions(user_id)
+    for session_data in sessions.values():
+        for message in session_data.get("messages", []):
+            if media_type == "thumbnail":
+                if os.path.basename(message.get("thumbnail") or "") == filename:
+                    return True
+                continue
+            if os.path.basename(message.get("image") or "") == filename:
+                return True
+            if os.path.basename(message.get("reference_image") or "") == filename:
+                return True
+            if any(os.path.basename(item) == filename for item in (message.get("reference_images") or [])):
+                return True
+    return False
+
+
+def _serve_protected_media(directory, filename, media_type):
     safe_filename = secure_filename(filename)
-    
-    # 验证文件扩展名
+    if not safe_filename or safe_filename != filename:
+        return jsonify({"error": "Invalid file path"}), 400
     file_ext = os.path.splitext(safe_filename)[1].lower()
     if file_ext not in ALLOWED_IMAGE_EXTENSIONS:
         logger.warning(f"Attempted to access invalid file type: {filename}")
         return jsonify({"error": "Invalid file type"}), 400
-    
-    # 构建完整路径并验证
-    file_path = os.path.join(IMAGES_DIR, safe_filename)
+
+    file_path = os.path.join(directory, safe_filename)
     abs_file_path = os.path.abspath(file_path)
-    abs_images_dir = os.path.abspath(IMAGES_DIR)
-    
-    # 防止路径遍历攻击
-    if not abs_file_path.startswith(abs_images_dir):
+    abs_directory = os.path.abspath(directory)
+    if os.path.commonpath([abs_file_path, abs_directory]) != abs_directory:
         logger.warning(f"Path traversal attempt detected: {filename}")
         return jsonify({"error": "Invalid file path"}), 400
-    
-    # 检查文件是否存在
+    if not _user_can_access_media(session["user_id"], safe_filename, media_type):
+        return jsonify({"error": "无权访问该图片"}), 403
     if not os.path.exists(abs_file_path):
         return jsonify({"error": "File not found"}), 404
-    
-    return send_from_directory(IMAGES_DIR, safe_filename)
+    response = send_from_directory(directory, safe_filename)
+    response.headers["Cache-Control"] = "private, max-age=3600"
+    return response
+
+
+@app.route("/static/images/<filename>")
+@login_required
+def serve_image(filename):
+    """仅向图片所属用户或管理员提供原图。"""
+    return _serve_protected_media(IMAGES_DIR, filename, "image")
+
+
+@app.route("/static/thumbnails/<filename>")
+@login_required
+def serve_thumbnail(filename):
+    """仅向图片所属用户或管理员提供缩略图。"""
+    return _serve_protected_media(THUMBNAILS_DIR, filename, "thumbnail")
+
+
+@app.route("/static/<path:filename>", endpoint="static")
+def serve_public_static(filename):
+    """公开前端资源，但生成图片必须经过上面的鉴权路由。"""
+    normalized_filename = filename.replace("\\", "/")
+    path_parts = normalized_filename.split("/")
+    public_directories = {"css", "fonts", "js", "lib"}
+    if (
+        normalized_filename != filename
+        or any(part in ("", ".", "..") for part in path_parts)
+        or any(part.rstrip(" .") != part for part in path_parts)
+        or not (
+            path_parts[0].lower() in public_directories
+            or (len(path_parts) == 1 and path_parts[0].lower() == "logo.ico")
+        )
+    ):
+        return jsonify({"error": "File not found"}), 404
+    return send_from_directory(os.path.join(app.root_path, "static"), normalized_filename)
 
 
 # ========================================
@@ -1024,7 +1571,6 @@ def admin_page():
 
 @app.route("/api/admin/users", methods=["GET"])
 @admin_required
-@csrf.exempt
 def admin_get_users():
     """获取所有用户列表"""
     users = get_all_users()
@@ -1043,39 +1589,41 @@ def admin_get_users():
 
 @app.route("/api/admin/users/<int:user_id>", methods=["DELETE"])
 @admin_required
-@csrf.exempt
 def admin_delete_user(user_id):
     """删除用户"""
-    # 删除用户会话中关联的所有图片和缩略图
+    target_user = get_user_by_id(user_id)
+    if target_user is None:
+        return jsonify({"error": "用户不存在"}), 404
+    if target_user.get("is_admin"):
+        return jsonify({"error": "不能删除管理员账号"}), 400
+
+    user_sessions = {}
+    message = "用户已删除"
     try:
-        user_sessions = load_sessions(user_id)
-        for sid, session_data in user_sessions.items():
-            for msg in session_data.get("messages", []):
-                _delete_message_files(msg)
-    except Exception as e:
-        logger.warning(f"清理用户 {user_id} 的图片文件时出错: {e}")
-    
-    # 删除用户会话文件和锁文件
-    sessions_file = get_user_sessions_file(user_id)
-    if os.path.exists(sessions_file):
-        os.remove(sessions_file)
-    lock_file = sessions_file + ".lock"
-    if os.path.exists(lock_file):
-        try:
-            os.remove(lock_file)
-        except Exception:
-            pass
-    
-    success, message = delete_user(user_id)
-    if success:
-        return jsonify({"success": True, "message": message})
-    else:
-        return jsonify({"error": message}), 400
+        with _get_maintenance_lock():
+            with _get_session_lock(user_id):
+                user_sessions = _load_sessions_unlocked(user_id)
+                success, message = delete_user(user_id)
+                if not success:
+                    return jsonify({"error": message}), 400
+
+                # 数据库删除成功后再清理文件；失败只会留下可回收的孤儿文件。
+                for session_data in user_sessions.values():
+                    for msg in session_data.get("messages", []):
+                        _delete_message_files(msg)
+                sessions_file = get_user_sessions_file(user_id)
+                if os.path.exists(sessions_file):
+                    os.remove(sessions_file)
+        with active_chats_lock:
+            for sid in user_sessions:
+                active_chats.pop(sid, None)
+    except Exception as exc:
+        logger.warning(f"用户 {user_id} 已删除，但清理其文件时出错: {exc}")
+    return jsonify({"success": True, "message": message})
 
 
 @app.route("/api/admin/users/<int:user_id>/toggle-admin", methods=["POST"])
 @admin_required
-@csrf.exempt
 def admin_toggle_admin(user_id):
     """切换用户管理员状态"""
     success, message = toggle_admin(user_id)
@@ -1087,7 +1635,6 @@ def admin_toggle_admin(user_id):
 
 @app.route("/api/admin/users/<int:user_id>/credits", methods=["POST"])
 @admin_required
-@csrf.exempt
 def admin_add_credits(user_id):
     """管理员给用户充值"""
     data = _get_json_data()
@@ -1105,7 +1652,6 @@ def admin_add_credits(user_id):
 
 @app.route("/api/admin/users/<int:user_id>/sessions", methods=["GET"])
 @admin_required
-@csrf.exempt
 def admin_get_user_sessions(user_id):
     """获取指定用户的所有会话列表（不含消息内容，加快加载）"""
     sessions = load_sessions(user_id)
@@ -1124,7 +1670,6 @@ def admin_get_user_sessions(user_id):
 
 @app.route("/api/admin/users/<int:user_id>/sessions/<session_id>", methods=["GET"])
 @admin_required
-@csrf.exempt
 def admin_get_session_detail(user_id, session_id):
     """获取指定用户的单个会话详情（含消息，点击时加载）"""
     sessions = load_sessions(user_id)
@@ -1133,14 +1678,18 @@ def admin_get_session_detail(user_id, session_id):
         return jsonify({
             "id": session_id,
             "title": data.get("title", "新对话"),
-            "messages": [{k: v for k, v in msg.items() if k not in ("thought_signature", "text_thought_signature")} for msg in data.get("messages", [])]
+            "messages": [{
+                k: v for k, v in msg.items()
+                if k not in (
+                    "thought_signature", "text_thought_signature", "generation_charge_id",
+                )
+            } for msg in data.get("messages", [])]
         })
     return jsonify({"error": "会话不存在"}), 404
 
 
 @app.route("/api/admin/cleanup", methods=["POST"])
 @admin_required
-@csrf.exempt
 def admin_cleanup_data():
     """清理历史数据"""
     data = _get_json_data()
@@ -1157,11 +1706,13 @@ def admin_cleanup_data():
     except ValueError:
         return jsonify({"error": "日期格式无效"}), 400
 
-    # 第一步：清理过期消息
-    msg_stats = _cleanup_expired_messages(cutoff_date)
-    
-    # 第二步：清理孤儿图片
-    orphan_stats = _cleanup_orphan_files()
+    with _get_maintenance_lock():
+        msg_stats = _cleanup_expired_messages(cutoff_date)
+        orphan_stats = _cleanup_orphan_files()
+
+    # 被裁剪的历史不能继续残留在当前进程的模型上下文中。
+    with active_chats_lock:
+        active_chats.clear()
 
     return jsonify({
         "success": True,
@@ -1201,11 +1752,12 @@ def _cleanup_expired_messages(cutoff_date):
             with lock:
                 if not os.path.exists(filepath):
                     continue
-                with open(filepath, "r", encoding="utf-8") as f:
-                    sessions = json.load(f)
+                sessions = _load_sessions_unlocked(cleanup_user_id)
 
                 modified = False
                 sessions_to_remove = []
+                removed_messages = []
+                local_deleted_images = 0
 
                 for sid, session_data in sessions.items():
                     new_messages = []
@@ -1224,15 +1776,12 @@ def _cleanup_expired_messages(cutoff_date):
                                 pass
 
                         if should_delete:
-                            deleted_messages += 1
                             session_modified = True
-                            # 统计图片数
+                            removed_messages.append(msg)
                             if msg.get("image"):
-                                deleted_images += 1
+                                local_deleted_images += 1
                             if msg.get("reference_images"):
-                                deleted_images += len(msg["reference_images"])
-                            # 删除关联文件
-                            _delete_message_files(msg)
+                                local_deleted_images += len(msg["reference_images"])
                         else:
                             new_messages.append(msg)
 
@@ -1255,15 +1804,15 @@ def _cleanup_expired_messages(cutoff_date):
 
                 for sid in sessions_to_remove:
                     del sessions[sid]
-                    deleted_sessions += 1
                     modified = True
 
                 if modified:
-                    # 使用原子写入，与 save_sessions 保持一致
-                    tmp_file = filepath + ".tmp"
-                    with open(tmp_file, "w", encoding="utf-8") as f:
-                        json.dump(sessions, f, ensure_ascii=False, indent=2)
-                    os.replace(tmp_file, filepath)
+                    _save_sessions_unlocked(cleanup_user_id, sessions)
+                    for msg in removed_messages:
+                        _delete_message_files(msg)
+                    deleted_messages += len(removed_messages)
+                    deleted_images += local_deleted_images
+                    deleted_sessions += len(sessions_to_remove)
 
         except Exception as e:
             logger.error(f"Error processing {filename}: {e}")
@@ -1330,7 +1879,6 @@ def _cleanup_orphan_files():
 
 @app.route("/api/admin/card-keys", methods=["GET"])
 @admin_required
-@csrf.exempt
 def admin_get_card_keys():
     """获取所有卡密列表"""
     keys = get_all_card_keys()
@@ -1339,7 +1887,6 @@ def admin_get_card_keys():
 
 @app.route("/api/admin/card-keys", methods=["POST"])
 @admin_required
-@csrf.exempt
 def admin_generate_card_keys():
     """管理员生成卡密"""
     data = _get_json_data()
@@ -1356,14 +1903,172 @@ def admin_generate_card_keys():
         return jsonify({"error": message}), 400
 
 
+@app.route("/api/admin/api-settings", methods=["GET"])
+@admin_required
+def admin_get_api_settings():
+    """获取当前 API 设置（Key 脱敏）"""
+    db_settings = get_active_api_settings()
+    if db_settings:
+        # API Key 脱敏：只显示前4位和后4位
+        raw_key = db_settings["api_key"]
+        if len(raw_key) > 8:
+            masked_key = raw_key[:4] + "*" * (len(raw_key) - 8) + raw_key[-4:]
+        else:
+            masked_key = "****"
+        return jsonify({
+            "configured": True,
+            "provider": db_settings["provider"],
+            "api_key_masked": masked_key,
+            "custom_base_url": db_settings.get("custom_base_url", ""),
+            "default_model": db_settings.get("default_model", "gemini-3.1-flash-image"),
+            "email_sender": db_settings.get("email_sender") or os.getenv("EMAIL_SENDER", ""),
+            "email_password_configured": bool(db_settings.get("email_password") or os.getenv("EMAIL_PASSWORD")),
+            "smtp_server": db_settings.get("smtp_server") or os.getenv("SMTP_SERVER", ""),
+            "smtp_port": db_settings.get("smtp_port") or os.getenv("SMTP_PORT", ""),
+            "updated_at": db_settings.get("updated_at")
+        })
+
+    # 检查是否有 .env fallback
+    env_key = os.getenv("GEMINI_API_KEY")
+    env_url = os.getenv("GEMINI_API_BASE_URL")
+    if env_key:
+        if len(env_key) > 8:
+            masked_key = env_key[:4] + "*" * (len(env_key) - 8) + env_key[-4:]
+        else:
+            masked_key = "****"
+        return jsonify({
+            "configured": True,
+            "provider": "custom" if env_url else "google_ai",
+            "api_key_masked": masked_key,
+            "custom_base_url": env_url or "",
+            "default_model": os.getenv("DEFAULT_MODEL", "gemini-3.1-flash-image"),
+            "email_sender": os.getenv("EMAIL_SENDER", ""),
+            "email_password_configured": bool(os.getenv("EMAIL_PASSWORD")),
+            "smtp_server": os.getenv("SMTP_SERVER", ""),
+            "smtp_port": os.getenv("SMTP_PORT", ""),
+            "source": "env",
+            "updated_at": None
+        })
+
+    return jsonify({"configured": False})
+
+
+@app.route("/api/admin/api-settings", methods=["POST"])
+@admin_required
+def admin_save_api_settings():
+    """保存 API 设置并重建客户端"""
+    data = _get_json_data()
+    string_fields = (
+        "provider", "api_key", "custom_base_url", "default_model",
+        "email_sender", "email_password", "smtp_server",
+    )
+    if any(data.get(field) is not None and not isinstance(data.get(field), str) for field in string_fields):
+        return jsonify({"error": "设置字段格式无效"}), 400
+    provider = (data.get("provider") or "").strip()
+    api_key = (data.get("api_key") or "").strip()
+    custom_base_url = (data.get("custom_base_url") or "").strip() or None
+    default_model = (data.get("default_model") or "gemini-3.1-flash-image").strip()
+    email_sender = (data.get("email_sender") or "").strip() or None
+    email_password = (data.get("email_password") or "").strip() or None
+    smtp_server = (data.get("smtp_server") or "").strip() or None
+    smtp_port = data.get("smtp_port")
+
+    # 获取现有配置用于回填空字段
+    db_settings = get_active_api_settings()
+    if db_settings:
+        api_key = api_key or db_settings.get("api_key")
+        email_sender = email_sender or db_settings.get("email_sender") or os.getenv("EMAIL_SENDER")
+        email_password = email_password or db_settings.get("email_password") or os.getenv("EMAIL_PASSWORD")
+        smtp_server = smtp_server or db_settings.get("smtp_server") or os.getenv("SMTP_SERVER")
+        smtp_port = smtp_port or db_settings.get("smtp_port") or os.getenv("SMTP_PORT")
+    else:
+        # 仅使用 .env 部署时，保存其他设置也应复用现有密钥。
+        api_key = api_key or os.getenv("GEMINI_API_KEY")
+        email_sender = email_sender or os.getenv("EMAIL_SENDER")
+        email_password = email_password or os.getenv("EMAIL_PASSWORD")
+        smtp_server = smtp_server or os.getenv("SMTP_SERVER")
+        smtp_port = smtp_port or os.getenv("SMTP_PORT")
+
+    # 验证
+    if provider not in ('google_ai', 'custom'):
+        return jsonify({"error": "无效的服务商类型"}), 400
+    if default_model not in ALLOWED_MODELS:
+        return jsonify({"error": "无效的默认模型"}), 400
+    if not api_key:
+        return jsonify({"error": "API Key 不能为空"}), 400
+    if provider == 'custom' and not custom_base_url:
+        return jsonify({"error": "自定义模式下必须填写 API 端点 URL"}), 400
+    if smtp_port is not None:
+        try:
+            smtp_port = int(smtp_port)
+        except (TypeError, ValueError):
+            return jsonify({"error": "SMTP 端口必须是整数"}), 400
+        if not 1 <= smtp_port <= 65535:
+            return jsonify({"error": "SMTP 端口必须在 1 到 65535 之间"}), 400
+
+    # 保存到数据库
+    success, message = save_api_settings(provider, api_key, custom_base_url, default_model, email_sender, email_password, smtp_server, smtp_port)
+    if not success:
+        return jsonify({"error": message}), 400
+
+    # 重建客户端
+    reload_success = reload_client()
+    if not reload_success:
+        return jsonify({"error": "设置已保存，但客户端重建失败，请检查配置"}), 500
+
+    return jsonify({"success": True, "message": "API 设置已保存并生效"})
+
+
+@app.route("/api/admin/model-pricing", methods=["GET"])
+@admin_required
+def admin_get_model_pricing():
+    """返回后台价格编辑器需要的模型能力和当前价格。"""
+    pricing = get_model_pricing()
+    return jsonify({
+        "models": [{
+            "id": model_id, "name": config["name"],
+            "sizes": [{"id": size, "credits": pricing.get((model_id, size), DEFAULT_PRICES[size])}
+                      for size in config["sizes"]]
+        } for model_id, config in MODEL_CAPABILITIES.items()]
+    })
+
+
+@app.route("/api/admin/model-pricing", methods=["PUT"])
+@admin_required
+def admin_save_model_pricing():
+    """校验并保存管理员手工设置的每个模型/分辨率价格。"""
+    data = _get_json_data()
+    items = data.get("prices")
+    if not isinstance(items, list):
+        return jsonify({"error": "价格数据格式无效"}), 400
+    prices = {}
+    for item in items:
+        model_id = item.get("model_id") if isinstance(item, dict) else None
+        image_size = item.get("image_size") if isinstance(item, dict) else None
+        try:
+            credits = int(item.get("credits"))
+        except (ValueError, TypeError, AttributeError):
+            return jsonify({"error": "价格必须是非负整数"}), 400
+        if model_id not in MODEL_CAPABILITIES or image_size not in MODEL_CAPABILITIES[model_id]["sizes"]:
+            return jsonify({"error": "包含不支持的模型或分辨率"}), 400
+        if not 0 <= credits <= 100000:
+            return jsonify({"error": "价格必须在 0 到 100000 点之间"}), 400
+        prices[(model_id, image_size)] = credits
+    expected = {(model_id, size) for model_id, config in MODEL_CAPABILITIES.items() for size in config["sizes"]}
+    if set(prices) != expected:
+        return jsonify({"error": "请为所有受支持的模型分辨率填写价格"}), 400
+    success, message = save_model_pricing(prices)
+    return jsonify({"success": True, "message": message}) if success else (jsonify({"error": message}), 400)
+
 @app.route("/api/redeem", methods=["POST"])
 @login_required
-@csrf.exempt
 def redeem_card_key():
     """用户使用卡密充值"""
     user_id = session["user_id"]
     data = _get_json_data()
     code = data.get("code", "")
+    if not isinstance(code, str) or len(code) > 128:
+        return jsonify({"error": "卡密格式无效"}), 400
     
     success, message, new_credits = use_card_key(code, user_id)
     if success:

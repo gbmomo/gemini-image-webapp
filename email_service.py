@@ -13,13 +13,17 @@ import logging
 from email.header import Header
 from email.utils import formataddr
 
-# 配置邮箱服务器（从环境变量读取，必须在 .env 中配置）
-EMAIL_SENDER = os.getenv("EMAIL_SENDER", "")
-EMAIL_PASSWORD = os.getenv("EMAIL_PASSWORD", "")
-SMTP_SERVER = os.getenv("SMTP_SERVER", "")
-SMTP_PORT = int(os.getenv("SMTP_PORT", "465"))
+from database import get_active_api_settings
 
 logger = logging.getLogger(__name__)
+
+
+def _get_smtp_timeout():
+    try:
+        timeout = float(os.getenv("SMTP_TIMEOUT", "15"))
+        return timeout if timeout > 0 else 15.0
+    except (TypeError, ValueError):
+        return 15.0
 
 
 def generate_verification_code(length=6):
@@ -42,14 +46,26 @@ def send_verification_email(recipient_email, verification_code):
     Returns:
         (success: bool, message: str)
     """
-    if not EMAIL_PASSWORD:
-        logger.error("邮箱密码未配置")
+    # 数据库中的每个字段都可独立配置；空字段回退到环境变量。
+    db_settings = get_active_api_settings() or {}
+    email_sender = db_settings.get("email_sender") or os.getenv("EMAIL_SENDER", "")
+    email_password = db_settings.get("email_password") or os.getenv("EMAIL_PASSWORD", "")
+    smtp_server = db_settings.get("smtp_server") or os.getenv("SMTP_SERVER", "")
+    smtp_port_value = db_settings.get("smtp_port") or os.getenv("SMTP_PORT", "465")
+    try:
+        smtp_port = int(smtp_port_value)
+    except (TypeError, ValueError):
+        logger.error("SMTP 端口配置无效")
+        return False, "error_email_not_configured"
+
+    if not email_password or not email_sender or not smtp_server or not smtp_port:
+        logger.error("邮箱服务信息不完整，无法发送邮件")
         return False, "error_email_not_configured"
     
     try:
         # 创建邮件对象
         message = MIMEMultipart('alternative')
-        message['From'] = formataddr((str(Header("码言 Nano Banana", 'utf-8')), EMAIL_SENDER))
+        message['From'] = formataddr((str(Header("码言 Nano Banana", 'utf-8')), email_sender))
         message['To'] = recipient_email
         message['Subject'] = "码言 Nano Banana - 注册验证码"
         
@@ -180,8 +196,10 @@ def send_verification_email(recipient_email, verification_code):
         message.attach(part2)
         
         # 连接到 SMTP 服务器并发送邮件
-        with smtplib.SMTP_SSL(SMTP_SERVER, SMTP_PORT) as server:
-            server.login(EMAIL_SENDER, EMAIL_PASSWORD)
+        with smtplib.SMTP_SSL(
+            smtp_server, smtp_port, timeout=_get_smtp_timeout()
+        ) as server:
+            server.login(email_sender, email_password)
             server.send_message(message)
         
         logger.info(f"验证码邮件已发送到 {recipient_email}")

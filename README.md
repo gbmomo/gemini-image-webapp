@@ -1,4 +1,4 @@
-# 基于调用🍌Gemini Nano Banana api 的私有化 AI 图片生成网站源码
+# Gemini Nano Banana AI 图片生成网站
 
 <p align="center">
   <b>简体中文</b> | <a href="README_EN.md">English</a>
@@ -9,219 +9,95 @@
 </p>
 
 <p align="center">
-  <b>一键部署，拥有属于自己的 Gemini AI 图片生成网站</b>
+  基于 Flask 和 Gemini 图像模型的自托管图片生成网站，包含用户、点数、会话、卡密和管理后台。
 </p>
 
 <p align="center">
-  🌐 <b>在线演示：</b> <a href="https://nano.gitsay.com/" target="_blank">https://nano.gitsay.com/</a>
-</p>
-
-<p align="center">
-  只需填入 Google Gemini API Key，即可搭建一个功能完整的 AI 图片生成网站源码<br>
-  支持用户注册、点数系统、多轮对话、图生图等丰富功能
+  <a href="https://nano.gitsay.com/">在线演示</a> ·
+  <a href="https://github.com/gbmomo/gemini-image-webapp">项目仓库</a>
 </p>
 
 <p align="center">
   <img src="https://img.shields.io/github/stars/gbmomo/gemini-image-webapp?style=flat-square" alt="Stars">
   <img src="https://img.shields.io/github/forks/gbmomo/gemini-image-webapp?style=flat-square" alt="Forks">
   <img src="https://img.shields.io/badge/Python-3.10%2B-blue.svg" alt="Python">
-  <img src="https://img.shields.io/badge/Flask-3.0%2B-green.svg" alt="Flask">
+  <img src="https://img.shields.io/badge/Flask-3.x-green.svg" alt="Flask">
   <img src="https://img.shields.io/badge/License-CC%20BY--NC--SA%204.0-lightgrey.svg" alt="License">
 </p>
 
-> ⚠️ **许可证声明**：本项目采用 [CC BY-NC-SA 4.0](LICENSE) 许可证，使用本项目需遵守以下条款：
-> 
-> | 条款 | 要求 |
-> |------|------|
-> | **署名 (BY)** | 必须注明原作者 [@gbmomo](https://github.com/gbmomo) 并提供[原项目链接](https://github.com/gbmomo/gemini-image-webapp) |
-> | **非商业性 (NC)** | ❌ **严禁任何形式的商业使用**，如需商用请联系作者购买商用许可 |
-> | **相同方式共享 (SA)** | 修改后的作品必须以相同的 CC BY-NC-SA 4.0 许可证发布 |
-> 
-> 📧 商用授权联系：S@gitsay.com | QQ: 550948321 | 微信: Goblin_MoMo
+> 本项目采用 [CC BY-NC-SA 4.0](LICENSE) 许可证。使用时必须署名原作者 [@gbmomo](https://github.com/gbmomo)，并提供[原项目链接](https://github.com/gbmomo/gemini-image-webapp)；未经单独授权不得商用，修改后的作品须以相同许可证发布。商用授权联系：S@gitsay.com，QQ：550948321，微信：Goblin_MoMo。
 
----
+## 当前功能
 
-## 📸 效果展示
+- 文生图、参考图生图和带上下文的多轮图片迭代。参考图可通过文件选择、拖拽或粘贴添加。
+- 每个用户可创建、切换和删除多个会话；首轮成功后以提示词前 20 个字符自动命名，并锁定模型、分辨率和比例，如需更改必须新建会话。后端另提供标题修改接口，但当前界面没有重命名入口。
+- 提供中文和英文切换，默认语言在 `static/js/i18n.js` 的 `DEFAULT_LANG` 中设置。
+- 邮箱验证码注册、用户名密码登录、退出登录和基于签名 Cookie 的登录会话。
+- 新用户默认赠送 4 点；普通用户按“模型 + 分辨率”扣点，管理员生成不扣点。
+- 卡密自助充值；管理员可批量生成卡密并查看使用情况。
+- 后台管理用户、权限、点数、会话、消息、API/SMTP 设置和模型价格。
+- 历史数据清理、孤儿图片清理、缩略图、文件锁和生成扣费恢复。
+- CSRF、防暴力限流、上传校验、资源所有权校验及生产环境 HTTPS/安全响应头。
+- 生成图点击预览和下载、`Ctrl+Enter` 快速提交，以及适配窄屏的会话侧栏。
 
-### 登录与注册
+注册要求用户名唯一且为 3 到 64 个字符，邮箱唯一且不超过 254 个字符，密码为 6 到 256 个字符并同时包含字母和数字。验证码为 6 位数字、10 分钟有效且只能使用一次。
 
-<p align="center">
-  <img src="Display pictures/中文/登录界面.png" alt="登录界面" width="45%">
-  <img src="Display pictures/中文/注册页面.png" alt="注册页面" width="45%">
-</p>
+## 模型能力
 
-### 网站首页
+模型、分辨率、比例和参考图数量都由后端能力矩阵校验，不只是前端选项限制。
 
-<p align="center">
-  <img src="Display pictures/中文/网站首页（未生成之前）.png" alt="网站首页" width="80%">
-</p>
+| 模型 ID | 界面名称 | 分辨率 | 最大参考图数 | 支持比例 |
+|---|---|---:|---:|---|
+| `gemini-3.1-flash-lite-image` | Nano Banana 2 Lite | 1K | 14 | 通用比例 |
+| `gemini-3.1-flash-image` | Nano Banana 2 | 512、1K、2K、4K | 14 | 通用比例，另含 1:4、1:8、4:1、8:1 |
+| `gemini-3-pro-image` | Nano Banana Pro | 1K、2K、4K | 14 | 通用比例 |
+| `gemini-2.5-flash-image` | Nano Banana | 1K | 3 | 通用比例 |
 
-### AI 图片生成效果
+通用比例为：`1:1`、`2:3`、`3:2`、`3:4`、`4:3`、`4:5`、`5:4`、`9:16`、`16:9`、`21:9`。
 
-<p align="center">
-  <img src="Display pictures/中文/网站首页（生成图片的效果）.png" alt="生成图片效果" width="80%">
-</p>
+新会话在当前界面中默认使用后台选定的默认模型、`1K` 和 `1:1`；`auto` 比例仅为历史会话兼容保留。
 
-### 管理员后台
+参考图支持 PNG、JPEG、GIF、WEBP 和 ICO。默认限制为单张 10 MiB、单次请求合计 35 MiB、单张最多 4000 万像素；提示词最多 100000 个字符。这些大小限制可通过环境变量调整。API 响应包含多张图片时，当前实现只保存第一张，统一输出为 PNG，并生成 JPEG 缩略图。
 
-<p align="center">
-  <img src="Display pictures/中文/管理员后台首页.png" alt="管理员后台" width="80%">
-</p>
+## 点数与扣费
 
----
+未在后台设置价格时使用以下默认值：
 
-## 🎯 这是什么？
+| 分辨率 | 默认点数 |
+|---|---:|
+| 512 | 1 |
+| 1K | 1 |
+| 2K | 2 |
+| 4K | 4 |
 
-**gemini-image-webapp** 是一个开箱即用的 AI 图片生成网站系统。基于 Google Gemini 图像生成模型，让你可以快速搭建一个属于自己的 AI 绘图平台。
+管理员可按每个模型支持的分辨率分别设置 `0` 到 `100000` 点；价格为 `0` 时普通用户也可免费生成。
 
-**适合人群：**
-- 🎨 想要拥有私有 AI 绘图网站的个人或团队
-- 💼 想要运营 AI 图片生成服务的创业者
-- 🔧 需要内部 AI 绘图工具的公司
-- 📚 学习 Flask + AI API 开发的开发者
+普通用户生成前会原子预留点数。只有图片成功生成并写入会话后才提交扣费；API 失败、只返回文本、返回空内容或保存失败时会退款并清理本次文件。持久化扣费账本会对进程崩溃留下的过期预留自动对账。同一会话的生成请求通过跨进程文件锁串行执行，避免历史消息互相覆盖。
 
-**为什么选择这个项目？**
-- ✅ **零门槛** - 只需一个 Gemini API Key 即可运行
-- ✅ **功能完整** - 用户系统、点数计费、卡密充值全都有
-- ✅ **开箱即用** - 精美的 UI 界面，无需前端开发
-- ✅ **安全可靠** - 内置多重安全防护机制
-- ✅ **易于部署** - 支持本地开发和生产环境部署
+## 快速开始
 
----
-
-## 🌟 功能亮点
-
-### 🎨 强大的 AI 生图能力
-| 功能 | 描述 |
-|------|------|
-| **文生图** | 输入文字描述，AI 自动生成图片 |
-| **图生图** | 上传参考图片，AI 根据描述修改 |
-| **多轮对话** | AI 记住上下文，持续迭代优化图片 |
-| **多参考图** | 支持同时上传最多 14 张参考图片 |
-| **模型选择** | 支持 Nano Banana Pro（专业创作）和 Nano Banana 2（快速高效）两种模型切换 |
-| **高分辨率** | 支持 1K、2K、4K 三种分辨率 |
-| **多纵横比** | 1:1、16:9、9:16、4:3、21:9 等多种比例 |
-| **多语言支持** | 支持中英文切换，可配置默认语言 |
-
-### 👥 完整的用户系统
-| 功能 | 描述 |
-|------|------|
-| **用户注册** | 邮箱验证码注册，防止滥用 |
-| **用户登录** | 安全的密码验证 |
-| **点数系统** | 按分辨率消耗点数，精细化计费 |
-| **卡密充值** | 用户可通过卡密自助充值 |
-| **会话管理** | 多会话管理，随时切换对话 |
-
-### 🔧 强大的管理后台
-| 功能 | 描述 |
-|------|------|
-| **用户管理** | 查看、删除用户，管理权限 |
-| **点数管理** | 为用户手动充值点数 |
-| **卡密生成** | 批量生成充值卡密 |
-| **数据统计** | 查看用户使用情况 |
-| **数据清理** | 清理历史数据释放空间 |
-
-### 🔒 企业级安全
-- CSRF 跨站请求伪造防护
-- 速率限制防暴力破解
-- 密码哈希安全存储
-- Session 安全配置
-- 路径遍历攻击防护
-- 生产环境 HTTPS 强制
-- 敏感数据加密存储
-
-### 🛡️ 数据安全声明
-**安全声明: 本应用所有数据（用户账号、对话记录、图片等）均加密存储于您部署环境的本地 SQLite 数据库中。**
-
-- 我们不会上传任何数据至第三方服务器
-- 您完全掌控自己的数据隐私
-- 敏感信息（如 API Key、密码）均经过哈希加密处理
-
-### 🌐 国际化支持
-- 支持中文/英文界面一键切换
-- 自动检测浏览器语言偏好
-- 支持自定义默认语言配置
-
----
-
-## 🌐 国际化配置
-
-本系统支持多语言切换（目前支持中文和英文）。
-
-### 切换默认语言
-
-默认语言配置在 `static/js/i18n.js` 文件中。你可以修改 `DEFAULT_LANG` 变量来更改默认语言：
-
-1. 打开 `static/js/i18n.js` 文件
-2. 找到配置项区域：
-
-```javascript
-// ========================================
-// 配置项 - 可以在这里修改默认语言
-// ========================================
-const DEFAULT_LANG = 'zh';  // 默认语言: 'zh' (中文) 或 'en' (英文)
-```
-
-3. 将 `'zh'` 修改为 `'en'` 即可将默认语言设置为英文。
-
-### 添加新语言
-
-如果有开发能力，你可以在 `static/js/i18n.js` 的 `translations` 对象中添加新的语言包，并在 `index.html` 中添加对应的切换按钮。
-
----
-
-## 🚀 快速开始（5 分钟部署）
-
-### 第一步：获取项目代码
+要求 Python 3.10 或更高版本。
 
 ```bash
-# 克隆仓库
 git clone https://github.com/gbmomo/gemini-image-webapp.git
-
-# 进入项目目录
 cd gemini-image-webapp
+
+python -m venv .venv
 ```
 
-### 第二步：安装 Python 环境
-
-确保你的电脑已安装 Python 3.10 或更高版本：
+激活虚拟环境并安装依赖：
 
 ```bash
-# 检查 Python 版本
-python --version
-# 输出应该是 Python 3.10.x 或更高
-```
-
-创建虚拟环境（推荐）：
-
-```bash
-# Windows
-python -m venv venv
-venv\Scripts\activate
+# Windows PowerShell
+.venv\Scripts\Activate.ps1
 
 # macOS / Linux
-python3 -m venv venv
-source venv/bin/activate
-```
+source .venv/bin/activate
 
-安装依赖：
-
-```bash
 pip install -r requirements.txt
 ```
 
-### 第三步：获取 Gemini API Key
-
-1. 访问 [Google AI Studio](https://aistudio.google.com/apikey)
-2. 登录你的 Google 账号
-3. 点击「Create API Key」创建一个新的 API Key
-4. 复制生成的 API Key（形如 `AIzaSy...`）
-
-> ⚠️ **重要提示**：请妥善保管你的 API Key，不要泄露给他人！
-
-### 第四步：配置环境变量
-
-1. 创建配置文件（复制一份模板并重命名）：
+复制配置模板：
 
 ```bash
 # Windows
@@ -231,600 +107,228 @@ copy .env.example .env
 cp .env.example .env
 ```
 
-2. 打开刚才创建的 `.env` 文件，填写你的配置：
+至少设置以下两项：
 
 ```env
-# ========== 必填项（填这三个就能跑起来！） ==========
-
-# 你的 Gemini API Key（第三步获取的）
-GEMINI_API_KEY=AIzaSy你的API密钥
-
-# 随便写一串复杂的字符串，用于加密用户会话
-SECRET_KEY=abc123随便写一串复杂的字符
-
-# 管理员密码（登录 admin 账号用）
-ADMIN_PASSWORD=你的管理员密码
-
-# ========== 可选配置 ==========
-
-# 使用的 Gemini 模型（默认使用 gemini-3.1-flash-image-preview，即 Nano Banana 2）
-# 可选值：gemini-3.1-flash-image-preview（Nano Banana 2，快速高效，默认）
-#         gemini-3-pro-image-preview（Nano Banana Pro，专业创作）
-# 此设置控制前端默认选中的模型，用户仍可在界面上切换
-# GEMINI_MODEL=gemini-3.1-flash-image-preview
-
-# 如果你需要邮箱验证码注册功能，请配置以下内容：
-# EMAIL_SENDER=你的邮箱@qq.com
-# EMAIL_PASSWORD=邮箱授权码
-# SMTP_SERVER=smtp.qq.com
-# SMTP_PORT=465
+SECRET_KEY=请替换为高强度随机字符串
+ADMIN_PASSWORD=请替换为管理员密码
 ```
 
-> 💡 **小提示**：最简配置只需填写前三项即可运行！邮箱配置可以之后再添加。
+可用下面的命令生成 `SECRET_KEY`：
 
-### 第五步：启动应用
+```bash
+python -c "import secrets; print(secrets.token_hex(32))"
+```
+
+启动应用：
 
 ```bash
 python app.py
 ```
 
-看到以下输出说明启动成功：
+访问 `http://127.0.0.1:5000`，用账号 `admin` 和 `ADMIN_PASSWORD` 登录，再进入管理后台配置 Gemini API 和 SMTP。也可以直接在 `.env` 中设置 `GEMINI_API_KEY` 及邮件参数。
 
-```
- * Running on http://127.0.0.1:5000
-```
+`ADMIN_PASSWORD` 会在应用启动时同步到已有的 `admin` 账号。首次启动未配置它时，程序会生成随机密码并写入启动日志；生产环境应始终显式配置。
 
-### 第六步：开始使用！
+## 环境变量
 
-1. 打开浏览器，访问 `http://127.0.0.1:5000`
-2. 使用 `admin` + 你设置的管理员密码登录
-3. 开始创作你的第一张 AI 图片！
+后台保存的 API 设置整体优先于 `GEMINI_*` 环境变量，后台默认模型优先于 `DEFAULT_MODEL`；SMTP 的发件人、密码、服务器和端口则分别按“数据库非空值优先，否则回退环境变量”解析。完整模板见 [.env.example](.env.example)。
 
-🎉 **恭喜！你已经成功部署了自己的 AI 图片生成网站！**
+### 基础与 API
 
----
+| 变量 | 默认值 | 说明 |
+|---|---|---|
+| `SECRET_KEY` | 无 | Flask Session 和 CSRF 签名密钥，必须设置 |
+| `ADMIN_PASSWORD` | 首次启动随机生成 | `admin` 账号密码，生产环境必须设置 |
+| `GEMINI_API_KEY` | 空 | Gemini API Key；也可在后台保存 |
+| `GEMINI_API_BASE_URL` | 空 | 自定义兼容端点；设置后环境变量模式使用 `custom` Provider |
+| `DEFAULT_MODEL` | `gemini-3.1-flash-image` | 默认模型，必须是上表中的模型 ID |
+| `FLASK_ENV` | `development` | 设为 `production` 时强制 HTTPS 并启用生产安全头 |
+| `FLASK_DEBUG` | `False` | Flask 调试模式；生产环境保持关闭 |
 
-## 📖 详细使用教程
+### 邮件
 
-### 👤 普通用户使用流程
+| 变量 | 默认值 | 说明 |
+|---|---|---|
+| `EMAIL_SENDER` | 空 | SMTP 发件账号 |
+| `EMAIL_PASSWORD` | 空 | SMTP 密码或授权码 |
+| `SMTP_SERVER` | 空 | SMTP 服务器 |
+| `SMTP_PORT` | `465` | SMTP SSL 端口 |
+| `SMTP_TIMEOUT` | `15` | SMTP 连接超时秒数 |
 
-#### 1. 注册账号
-- 点击「立即注册」
-- 输入用户名、邮箱、密码
-- 输入邮箱收到的验证码
-- 完成注册（新用户赠送 4 点数）
+### 部署、存储与限制
 
-#### 2. 创建对话
-- 点击左侧「+ 新对话」按钮
-- 给对话起个名字（可选）
+| 变量 | 默认值 | 说明 |
+|---|---|---|
+| `TRUST_PROXY_COUNT` | `0` | 可信反向代理层数；单层 Nginx 通常设为 `1` |
+| `RATELIMIT_STORAGE_URI` | `memory://` | 限流存储；多 worker 必须改为 Redis 等共享后端 |
+| `DATABASE_FILE` | `data/users.db` | SQLite 文件路径 |
+| `DATA_DIR` | `data` | 会话 JSON 和锁文件目录 |
+| `IMAGES_DIR` | `static/images` | 生成图及参考图目录 |
+| `THUMBNAILS_DIR` | `static/thumbnails` | 缩略图目录 |
+| `DATABASE_BUSY_TIMEOUT_MS` | `5000` | SQLite 忙等待毫秒数 |
+| `MAX_REQUEST_BYTES` | `52428800` | HTTP 请求体上限，默认 50 MiB |
+| `MAX_REFERENCE_IMAGE_BYTES` | `10485760` | 单张参考图上限，默认 10 MiB |
+| `MAX_REFERENCE_TOTAL_BYTES` | `36700160` | 单次请求参考图总上限，默认 35 MiB |
+| `MAX_REFERENCE_PIXELS` | `40000000` | 单张参考图最大像素数 |
+| `GENERATION_CHARGE_TTL_SECONDS` | `900` | 待处理扣费的恢复窗口，代码强制最低 600 秒 |
+| `GENERATION_LOCK_TIMEOUT` | `330` | 等待同一会话生成锁的秒数 |
+| `DISABLE_BACKGROUND_TASKS` | `false` | 设为 `true` 时关闭应用内后台清理线程 |
+| `CHAT_IDLE_TIMEOUT` | `1800` | 进程内 Gemini 聊天缓存闲置时间，秒 |
+| `CHAT_CLEANUP_INTERVAL` | `600` | 后台清理检查间隔，秒 |
 
-#### 3. 选择参数
-- **AI 模型**：Nano Banana Pro（专业创作）、Nano Banana 2（快速高效）
-- **分辨率**：1K（1点）、2K（2点）、4K（4点）
-- **纵横比**：自动、1:1、16:9、9:16 等
+`DATA_DIR` 只控制会话目录和维护锁位置；SQLite 位置始终由独立的 `DATABASE_FILE` 控制。
 
-> ⚠️ 注意：首次生成后模型、分辨率、纵横比参数会被锁定，需要创建新对话才能更改
+## 管理后台
 
-#### 4. 生成图片
+管理员访问 `/admin` 可使用以下功能：
 
-**文生图**：直接输入描述文字
-```
-示例：一只可爱的柯基犬在樱花树下奔跑，阳光明媚，日系动漫风格，高清
-```
+- 查看用户、角色、余额、会话数和消息数，并查看某个用户的会话及消息详情。
+- 给用户增加或扣除点数，但扣除后余额不能低于 0。
+- 授予或取消管理员权限；主管理员 `admin` 的角色不能修改。
+- 删除普通用户及其会话和关联图片；管理员账号不能删除。
+- 每批生成 1 到 100 张卡密，每张点数必须大于 0。完整卡密只在生成响应中显示一次，之后仅显示前缀和使用记录。
+- 按日期清理历史消息、空会话、关联文件及孤儿文件，或清理全部会话数据。
+- 在 Google AI Studio 和自定义 URL 两种 Provider 间切换，设置 API Key、自定义 URL 和默认模型。
+- 设置发件邮箱、SMTP 密码、服务器和端口。
+- 按模型和分辨率编辑点数价格。设置保存后当前进程立即重建客户端，其他 worker 会根据配置版本自动刷新。
 
-**图生图**：上传参考图片 + 输入描述
-```
-示例：把图片中的人物换成猫耳娘风格
-```
+当前充值弹窗中的“前往购买”按钮固定指向 `https://pay.ldxp.cn/shop/momo/fhrvq4`。自行部署时应在 `templates/index.html` 中替换为自己的购买地址，或移除该按钮；卡密兑换本身在本地完成。顶部的“`$0.04起/张`”也是 `static/js/i18n.js` 中的固定展示文案，不会随后台点数价格变化。
 
-#### 5. 迭代优化
-- 生成后可以继续发送消息修改
-- AI 会记住之前生成的图片
-- 可以说「把背景换成星空」「让色彩更鲜艳」等
+## 数据存储与安全边界
 
-#### 6. 下载图片
-- 点击生成的图片查看大图
-- 点击「下载图片」保存到本地
+| 数据 | 存储位置 | 实际保护方式 |
+|---|---|---|
+| 用户、验证码、卡密、API/SMTP 设置、价格、扣费账本 | SQLite，默认 `data/users.db` | 密码和验证码使用带盐哈希；卡密保存验证哈希、SHA-256 查找值和前缀 |
+| 会话与消息 | `data/sessions/user_<id>.json` | 本地明文 JSON；文件锁、临时文件、`fsync` 和原子替换 |
+| 生成图、参考图、缩略图 | `static/images`、`static/thumbnails` | 本地明文文件；HTTP 访问仅允许文件所有者或管理员 |
 
-### 🔧 管理员使用指南
+请注意以下边界：
 
-使用 `admin` 账号登录后，点击右上角「管理后台」进入管理控制台。
+- API Key、SMTP 密码、邮箱、会话 JSON 和图片没有静态加密。它们依赖部署机器的文件权限、磁盘加密和备份策略保护。
+- Flask Session Cookie 是签名数据，不应把 `SECRET_KEY` 理解为数据库或文件加密密钥。
+- 生成时，提示词、会话上下文和参考图会发送给配置的 Gemini/API Provider；注册时，收件邮箱和验证码会发送给配置的 SMTP 服务。部署者需要按所用服务商条款向用户说明数据处理方式。
+- 应备份 SQLite 数据库、`data/sessions`、图片和缩略图目录；只备份数据库不能恢复完整历史。
 
-#### 用户管理
-- 查看所有注册用户
-- 查看用户的会话和消息数
-- 为用户手动充值点数
-- 设置/取消管理员权限
-- 删除违规用户
+应用还启用了以下保护：所有非安全 HTTP 方法进行 CSRF 校验，Token 有效期为 1 小时；Session Cookie 为 `HttpOnly`、`SameSite=Lax`，生产模式下为 `Secure`；登录 `5/分钟`、验证码 `1/分钟`、注册 `3/小时`、生成 `20/小时`，全局默认 `100/小时` 和 `1000/天`，均按客户端 IP 限制；上传内容会进行 Base64、格式、大小和像素校验。
 
-#### 卡密管理
-- 批量生成充值卡密
-- 设置每张卡密的点数
-- 查看卡密使用记录
-- 卡密生成后请立即复制保存（只显示一次！）
+## 生产部署
 
-#### 数据清理
-- 设置截止日期
-- 清理指定日期前的历史数据
-- 释放服务器存储空间
+推荐使用 Gunicorn 放在 Nginx 等 HTTPS 反向代理之后。Gemini SDK 超时为 300 秒，因此 Gunicorn 和反向代理超时应更长：
 
----
-
-## 💰 点数消耗说明
-
-| 分辨率 | 像素 | 消耗点数 | 适用场景 |
-|--------|------|----------|----------|
-| **1K** | 约 1024px | 🪙 1 点 | 快速预览、草图 |
-| **2K** | 约 2048px | 🪙 2 点 | 日常使用（推荐） |
-| **4K** | 约 4096px | 🪙 4 点 | 高清壁纸、印刷 |
-
-> 💡 管理员账号免费使用，不消耗点数
-
----
-
-## 🌐 生产环境部署（宝塔面板）
-
-如果你想把网站部署到服务器上供他人访问，推荐使用 **宝塔面板（BT Panel）** 进行部署，操作简单，适合新手。
-
-> 💡 宝塔面板官网：[https://www.bt.cn](https://www.bt.cn)，可参考官方 Python 部署教程：[宝塔面板 Python 网站部署教程](https://www.bt.cn/bbs/thread-144409-1-1.html)
-
-### 前置准备
-
-1. 一台安装了 **Linux 系统**（推荐 Ubuntu 20.04 / CentOS 7.9+）的云服务器
-2. 已安装 **宝塔面板**（推荐 9.0+ 版本），安装命令可从 [宝塔官网](https://www.bt.cn/new/download.html) 获取
-3. 在宝塔面板中安装 **Nginx**（推荐 1.24+，通过「软件商店」安装）
-4. 一个已解析到服务器 IP 的 **域名**
-
-### 第零步：准备 Python 环境
-
-在部署项目之前，需要先在宝塔面板中安装 Python 环境并创建虚拟环境。
-
-#### a. 安装 Python 版本
-
-1. 在宝塔面板左侧菜单，点击 **「网站」**→ **「Python 项目」**
-2. 点击右上角 **「环境管理」**
-3. 点击 **「版本管理」**
-4. 找到 **Python 3.14.3**（或其他 3.10+ 版本），点击 **「安装」**
-5. 等待安装完成（需要几分钟）
-
-<p align="center">
-  <img src="Display pictures/BT/python版本安装界面.png" alt="Python版本安装界面" width="80%">
-</p>
-
-#### b. 创建虚拟环境
-
-安装好 Python 版本后，建议为本项目创建一个**独立的虚拟环境**，避免不同项目之间的依赖包冲突。
-
-1. 在「环境管理」页面，选择已安装的 Python 版本
-2. 点击 **「创建虚拟环境」**
-3. 填写虚拟环境名称，例如 `gitsay_gemini_nano`
-4. 点击确认创建
-
-<p align="center">
-  <img src="Display pictures/BT/创建虚拟环境界面.png" alt="创建虚拟环境界面" width="80%">
-</p>
-
-> 💡 **为什么要用虚拟环境？**
-> 虚拟环境将本项目的依赖包与系统环境隔离，防止不同项目之间的包版本冲突，方便管理和维护。
-
-### 第一步：上传项目代码
-
-1. 登录宝塔面板，进入 **「文件」** 管理
-2. 进入 `/www/wwwroot/` 目录
-3. 点击 **「上传」**，将整个项目文件夹上传到服务器，例如上传后路径为：
-   ```
-   /www/wwwroot/gemini-image-webapp
-   ```
-4. 也可以使用 SFTP 工具（如 WinSCP、FileZilla）上传
-
-> 💡 你也可以在终端中使用 `git clone` 直接拉取项目代码：
-> ```bash
-> cd /www/wwwroot
-> git clone https://github.com/gbmomo/gemini-image-webapp.git
-> ```
-
-### 第二步：创建 Python 项目
-
-1. 在宝塔面板左侧菜单，点击 **「网站」**
-2. 点击 **「Python 项目」** 标签页
-3. 点击 **「添加 Python 项目」**，按以下配置填写：
-
-<p align="center">
-  <img src="Display pictures/BT/宝塔面板添加python项目.png" alt="宝塔面板添加Python项目" width="80%">
-</p>
-
-| 配置项 | 填写内容 |
-|--------|----------|
-| **项目名称** | `gemini-image-webapp`（自定义，方便识别） |
-| **Python 环境** | 选择 `Python 3.10+`（如无可用环境，点击右侧「环境管理」安装） |
-| **启动方式** | 选择 `gunicorn` |
-| **项目路径** | `/www/wwwroot/gemini-image-webapp`（你上传的项目路径） |
-| **启动命令** | `gunicorn -w 3 -b 0.0.0.0:5000 --timeout 300 app:app` |
-| **环境变量** | 选择「指定变量」（第三步详细说明） |
-| **启动用户** | `www`（默认即可） |
-| **安装依赖包** | 填写 `requirements.txt` 的路径，或留空后手动安装 |
-
-> ⚠️ **启动命令说明**：
-> - `-w 3`：开启 3 个 worker 进程（可根据服务器 CPU 核数调整，一般为 `2 * CPU核数 + 1`）
-> - `-b 0.0.0.0:5000`：监听所有网卡的 5000 端口
-> - `--timeout 300`：超时时间 300 秒（AI 生图需要较长时间，不要设置太短）
-> - `app:app`：Flask 应用入口
-
-### 第三步：配置环境变量
-
-在创建项目时，环境变量部分选择 **「指定变量」**，然后逐行添加以下环境变量（也可以在项目创建后，进入项目 **「设置」** 中修改）：
-
-<p align="center">
-  <img src="Display pictures/BT/环境变量配置界面.png" alt="环境变量配置界面" width="80%">
-</p>
-
-```env
-EMAIL_SENDER=你的发件邮箱@example.com
-ADMIN_PASSWORD=你的管理员密码
-SMTP_SERVER=smtp.exmail.qq.com
-EMAIL_PASSWORD=你的邮箱授权码
-SMTP_PORT=465
-GEMINI_API_KEY=你的Gemini_API_Key
-FLASK_ENV=production
-SECRET_KEY=你的随机密钥字符串
-FLASK_DEBUG=False
+```bash
+gunicorn -w 1 --threads 8 -b 127.0.0.1:5000 --timeout 360 app:app
 ```
 
-| 变量名 | 说明 | 是否必填 |
-|--------|------|----------|
-| `GEMINI_API_KEY` | 你的 Google Gemini API 密钥 | ✅ 必填 |
-| `SECRET_KEY` | 随机加密字符串，用于 Session 加密 | ✅ 必填 |
-| `ADMIN_PASSWORD` | 管理员登录密码 | ✅ 必填 |
-| `FLASK_ENV` | 设置为 `production` | ✅ 必填 |
-| `FLASK_DEBUG` | 设置为 `False` | ✅ 必填 |
-| `EMAIL_SENDER` | 发件邮箱地址 | 可选（需要注册功能时必填） |
-| `EMAIL_PASSWORD` | 邮箱 SMTP 授权码 | 可选 |
-| `SMTP_SERVER` | SMTP 服务器地址 | 可选 |
-| `SMTP_PORT` | SMTP 端口号（通常为 465） | 可选 |
-
-> ⚠️ **注意**：配置完环境变量后，需要 **重启项目** 才能生效。
-
-### 第四步：启动项目并验证
-
-1. 配置完成后，点击 **「启动」** 或 **「重启」** 按钮
-2. 查看项目状态，确认显示为 **「运行中」**
-3. 查看项目日志，确认没有报错信息
-
-<p align="center">
-  <img src="Display pictures/BT/项目运行状态.png" alt="项目运行状态" width="80%">
-</p>
-
-4. 在浏览器中访问 `http://你的服务器IP:5000`，确认网站可以正常访问
-
-> 💡 如果无法访问，请检查：
-> - 宝塔面板「安全」中是否已放行 5000 端口
-> - 服务器安全组（如阿里云/腾讯云）是否已开放 5000 端口
-> - 项目日志中是否有报错信息
-
-### 第五步：配置域名和外网映射
-
-#### 5.1 绑定域名
-
-1. 在 Python 项目列表中，点击项目进入 **「设置」**
-2. 找到 **「域名管理」** 部分
-3. 添加你的域名，例如 `nano.gitsay.com`
-
-<p align="center">
-  <img src="Display pictures/BT/域名绑定界面.png" alt="域名绑定界面" width="80%">
-</p>
-
-#### 5.2 开启外网映射
-
-1. 在项目设置中，找到 **「外网映射」** 选项
-2. 点击 **「开启外网映射」**，填写以下配置：
-
-<p align="center">
-  <img src="Display pictures/BT/外网映射配置.png" alt="外网映射配置" width="80%">
-</p>
-
-| 配置项 | 填写内容 |
-|--------|----------|
-| **代理路由** | `/` |
-| **代理端口** | `5000` |
-
-3. 点击保存，宝塔会自动创建一个 Nginx 反向代理网站
-
-### 第六步：配置 SSL 证书（HTTPS）
-
-1. 在宝塔面板左侧菜单，点击 **「网站」**
-2. 找到刚才映射创建的网站，点击 **「设置」**
-3. 点击左侧 **「SSL」** 标签
-4. 可以选择以下方式申请证书：
-   - **Let's Encrypt**：免费证书，点击「申请」即可自动签发
-   - **宝塔证书**：宝塔提供的免费证书
-   - **其他证书**：如果你已有证书，可以粘贴 PEM 格式的证书和密钥
-
-<p align="center">
-  <img src="Display pictures/BT/SSL证书申请.png" alt="SSL证书申请界面" width="80%">
-</p>
-
-5. 证书申请成功后，开启 **「强制 HTTPS」**
-
-### 第七步：优化 Nginx 配置（推荐）
-
-网站创建后，你可以通过 **「设置」→「配置文件」** 来优化 Nginx 配置，以更好地支持 AI 图片生成服务。
-
-以下是一份推荐的配置参考，你可以根据自己的实际情况进行修改：
+单层 Nginx 的关键配置示例：
 
 ```nginx
-server
-{
-    listen 80;
+server {
     listen 443 ssl;
-    listen 443 quic;
-    http2 on;
-    server_name 你的域名.com;
-    index index.html index.htm default.htm default.html;
-    root /www/wwwroot/gemini-image-webapp;
+    server_name example.com;
 
-    #SSL-START SSL相关配置
-    ssl_certificate    /www/server/panel/vhost/cert/你的网站名/fullchain.pem;
-    ssl_certificate_key    /www/server/panel/vhost/cert/你的网站名/privkey.pem;
-    ssl_protocols TLSv1.2 TLSv1.3;
-    ssl_ciphers EECDH+CHACHA20:EECDH+CHACHA20-draft:EECDH+AES128:RSA+AES128:EECDH+AES256:RSA+AES256:!MD5:!3DES;
-    ssl_prefer_server_ciphers on;
-    ssl_session_cache shared:SSL:10m;
-    ssl_session_timeout 10m;
-    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
-    error_page 497  https://$host$request_uri;
-    #SSL-END
+    client_max_body_size 50m;
 
-    # --- 安全增强 Headers ---
-    add_header X-Frame-Options "DENY" always;
-    add_header X-Content-Type-Options "nosniff" always;
-    add_header X-XSS-Protection "1; mode=block" always;
-    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
-
-    # --- 上传大小限制 (允许最大 50MB) ---
-    client_max_body_size 50M;
-
-    # --- 强制 HTTP 跳转 HTTPS ---
-    if ($scheme = http) {
-        return 301 https://$host$request_uri;
-    }
-
-    # 禁止访问的敏感文件
-    location ~* (\.env.*|\.git|\.htaccess|\.user\.ini|\.DS_Store|README\.md|requirements\.txt|\.py$)
-    {
-        return 404;
-    }
-
-    # --- 健康检查端点 ---
-    location /health {
-        access_log off;
-        return 200 "OK";
-        add_header Content-Type text/plain;
-    }
-
-    # --- 反向代理到 Python 应用 ---
     location / {
         proxy_pass http://127.0.0.1:5000;
-
-        # 代理头部设置
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Host $server_name;
         proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_set_header REMOTE-HOST $remote_addr;
-
-        # WebSocket 支持（流式输出需要）
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
-
-        # 超时设置 - AI 生成需要较长时间
-        proxy_connect_timeout 180s;
-        proxy_send_timeout 180s;
-        proxy_read_timeout 180s;
+        proxy_connect_timeout 360s;
+        proxy_send_timeout 360s;
+        proxy_read_timeout 360s;
     }
-
-    access_log  /www/wwwlogs/你的网站名.log;
-    error_log  /www/wwwlogs/你的网站名.error.log;
 }
 ```
 
-> ⚠️ **重要提示**：
-> - 请将 `你的域名.com` 和 `你的网站名` 替换为你的实际域名和网站名称
-> - SSL 证书路径以宝塔面板实际生成的为准
-> - 超时时间建议设为 180 秒以上，AI 图片生成需要较长处理时间
+同时设置 `FLASK_ENV=production`、`FLASK_DEBUG=False` 和 `TRUST_PROXY_COUNT=1`。`TRUST_PROXY_COUNT` 只能等于实际可信代理层数，不要在应用直接暴露公网时启用。确保运行用户可写数据库、`DATA_DIR`、`IMAGES_DIR` 和 `THUMBNAILS_DIR`。
 
-### 第八步：最终验证
+默认 `memory://` 限流只适合单 worker。使用多个 worker 时配置 Redis，例如 `RATELIMIT_STORAGE_URI=redis://127.0.0.1:6379/0`。应用没有 WebSocket 或流式输出要求。
 
-1. 在浏览器中访问 `https://你的域名.com`
-2. 确认 HTTPS 证书正常工作（地址栏显示🔒）
-3. 使用 `admin` + 你设置的管理员密码登录
-4. 尝试生成一张图片，确认所有功能正常
+## HTTP 路由总览
 
-🎉 **恭喜！你已经通过宝塔面板成功部署了 AI 图片生成网站！**
+所有 `POST`、`PUT`、`DELETE` 请求都需要有效 CSRF Token。网页会从 `<meta name="csrf-token">` 读取 Token 并通过 `X-CSRFToken` 发送；自行调用 API 时也必须保留同一浏览器 Session Cookie 和 Token。
 
-### 其他部署方式
+| 方法 | 路径 | 权限 | 用途 |
+|---|---|---|---|
+| GET | `/` | 公开 | 主页面，同时签发 CSRF Session |
+| GET | `/login` | 公开 | 重定向到主页面 |
+| GET | `/api/models` | 公开 | 模型能力、价格及默认模型 |
+| POST | `/api/login` | 公开 | 登录 |
+| POST | `/api/send-verification-code` | 公开 | 发送注册验证码 |
+| POST | `/api/register` | 公开 | 注册用户 |
+| POST | `/api/logout` | 登录 | 退出登录并返回 302 页面重定向 |
+| GET / POST | `/api/sessions` | 登录 | 获取或创建会话 |
+| GET / DELETE | `/api/sessions/<session_id>` | 登录 | 获取或删除会话 |
+| PUT | `/api/sessions/<session_id>/title` | 登录 | 修改会话标题 |
+| POST | `/api/generate` | 登录 | 生成或迭代图片 |
+| POST | `/api/redeem` | 登录 | 使用卡密充值 |
+| GET | `/static/images/<filename>` | 文件所有者或管理员 | 获取生成图或参考图 |
+| GET | `/static/thumbnails/<filename>` | 文件所有者或管理员 | 获取缩略图 |
+| GET | `/admin` | 管理员 | 管理后台页面 |
+| GET | `/api/admin/users` | 管理员 | 用户及统计列表 |
+| DELETE | `/api/admin/users/<id>` | 管理员 | 删除普通用户 |
+| POST | `/api/admin/users/<id>/toggle-admin` | 管理员 | 切换角色 |
+| POST | `/api/admin/users/<id>/credits` | 管理员 | 增减点数 |
+| GET | `/api/admin/users/<id>/sessions` | 管理员 | 查看用户会话 |
+| GET | `/api/admin/users/<id>/sessions/<session_id>` | 管理员 | 查看消息详情 |
+| POST | `/api/admin/cleanup` | 管理员 | 清理历史数据和孤儿文件 |
+| GET / POST | `/api/admin/card-keys` | 管理员 | 查看或生成卡密 |
+| GET / POST | `/api/admin/api-settings` | 管理员 | 查看或保存 API/SMTP 设置 |
+| GET / PUT | `/api/admin/model-pricing` | 管理员 | 查看或保存模型价格 |
 
-除宝塔面板外，你还可以使用以下方式部署：
+主要 JSON 写入字段如下：登录为 `username`、`password`；发验证码为 `email`；注册为 `username`、`email`、`password`、`verification_code`；修改标题为 `title`；生成图片为 `session_id`、`prompt`、`model`、`image_size`、`aspect_ratio`、`reference_images`；兑换为 `code`；管理员点数调整为 `amount`；清理为 `cutoff_date`；生成卡密为 `credits`、`count`；API/SMTP 设置为 `provider`、`api_key`、`custom_base_url`、`default_model`、`email_sender`、`email_password`、`smtp_server`、`smtp_port`；模型定价为 `prices` 数组，其中每项包含 `model_id`、`image_size`、`credits`。
 
-- **Gunicorn + Nginx 手动部署**：适合有 Linux 服务器运维经验的用户
-- **Docker / Docker Compose**：适合熟悉容器化部署的用户
-- **1Panel 面板**：另一款开源服务器管理面板，操作类似
+## 项目结构
 
-> 💡 如需其他部署方式的详细教程，可以询问 AI 助手或搜索相关资料。
-
-## 📁 项目结构说明
-
-```
-gemini-image-webapp/
-│
-├── 📄 app.py                 # 主程序入口（Flask 应用）
-├── 📄 database.py            # 数据库操作（用户、卡密等）
-├── 📄 email_service.py       # 邮件服务（验证码发送）
-├── 📄 requirements.txt       # Python 依赖列表
-├── 📄 .env                   # 环境变量配置（需自己创建）
-├── 📄 .env.example           # 环境变量模板
-├── 📄 .gitignore             # Git 忽略规则
-│
-├── 📁 data/                  # 数据目录（自动生成）
-│   ├── users.db              # SQLite 用户数据库
-│   └── sessions/             # 用户会话 JSON 文件
-│
-├── 📁 static/                # 静态资源
-│   ├── css/                  # 样式文件
-│   ├── js/                   # JavaScript 脚本
-│   ├── fonts/                # 字体文件
-│   ├── lib/                  # 第三方库（如日期选择器）
-│   ├── logo.ico              # 网站图标
-│   ├── images/               # 生成的图片（自动创建）
-│   └── thumbnails/           # 缩略图（自动创建）
-│
-└── 📁 templates/             # HTML 模板
-    ├── index.html            # 用户主页面
-    └── admin.html            # 管理后台页面
-```
-
----
-
-## ❓ 常见问题
-
-### Q: 生成图片很慢/超时怎么办？
-**A:** Gemini 图片生成通常需要 30-60 秒，这是正常的。如果经常超时：
-- 检查网络连接是否稳定
-- 可以配置 `GEMINI_API_BASE_URL` 使用代理
-- 减少参考图片数量
-
-### Q: 验证码邮件收不到？
-**A:** 
-- 检查垃圾邮件文件夹
-- 确认邮箱配置正确（使用授权码而非登录密码）
-- QQ 邮箱需要先开启 SMTP 服务
-
-### Q: 如何使用代理访问 Gemini API？
-**A:** 
-
-**本地开发环境**：在 `.env` 文件中配置：
-```env
-GEMINI_API_BASE_URL=http://你的代理地址:端口
+```text
+app.py                 Flask 应用、路由、生成与会话逻辑
+database.py            SQLite 初始化、迁移、用户、卡密、定价与扣费
+email_service.py       SMTP 验证码邮件
+templates/             主页面和管理后台模板
+static/js/             认证、生成、后台、弹窗和中英文文案
+static/css/            页面样式
+data/                   SQLite、会话 JSON 和锁文件（运行时创建）
+static/images/          生成图和参考图（运行时创建）
+static/thumbnails/      缩略图（运行时创建）
+tests/                  unittest 回归测试
+Display pictures/       README 截图
 ```
 
-**服务器部署环境（宝塔面板）**：在宝塔面板的 Python 项目设置中，找到「环境变量」，添加：
-```env
-GEMINI_API_BASE_URL=http://你的代理地址:端口
+## 测试
+
+测试使用独立临时数据库和存储目录，不应指向真实 `data/users.db`：
+
+```bash
+python -m unittest discover -v
 ```
-添加后需要 **重启项目** 才能生效。
 
-> ⚠️ **重要提示：本项目使用 Gemini 官方 API 协议**
-> 
-> 本项目调用的 API 必须遵循 **Google Gemini 官方 API 协议格式**，例如：
-> - `http://127.0.0.1:8045/v1beta/models`
-> - `https://generativelanguage.googleapis.com/v1beta/models`
-> 
-> 如果你使用第三方 API 代理服务，请确保该服务完全兼容 Gemini API 协议（`/v1beta/models` 端点格式），而非 OpenAI API 格式。
-> 
-> 配置示例：
-> ```env
-> GEMINI_API_BASE_URL=http://127.0.0.1:8045
-> GEMINI_API_KEY=你的API密钥
-> ```
+## 截图
 
-### Q: 如何关闭邮箱验证注册？
-**A:** 目前版本需要修改源码。在 `app.py` 的 `api_register` 函数中注释掉验证码校验逻辑。
+<p align="center">
+  <img src="Display pictures/中文/登录界面.png" alt="登录界面" width="45%">
+  <img src="Display pictures/中文/注册页面.png" alt="注册页面" width="45%">
+</p>
 
-### Q: 忘记管理员密码怎么办？
-**A:** 管理员密码是通过环境变量 `ADMIN_PASSWORD` 设置的：
-- **本地开发**：修改 `.env` 文件中的 `ADMIN_PASSWORD` 值，然后重启应用
-- **服务器部署（宝塔面板）**：在宝塔面板的 Python 项目设置中，修改环境变量 `ADMIN_PASSWORD` 的值，然后重启项目
+<p align="center">
+  <img src="Display pictures/中文/网站首页（生成图片的效果）.png" alt="图片生成效果" width="80%">
+</p>
 
----
+<p align="center">
+  <img src="Display pictures/中文/管理员后台首页.png" alt="管理员后台" width="80%">
+</p>
 
-## 🔧 API 接口文档
+## 常见问题
 
-<details>
-<summary>点击展开完整 API 文档</summary>
+**提示“API 未配置”**：用 `admin` 登录后在管理后台保存 API Key，或设置 `GEMINI_API_KEY` 并重启。
 
-### 认证接口
+**无法发送注册验证码**：确认发件账号、密码/授权码、SMTP 服务器和端口四项均已配置；当前邮件客户端使用 SMTP over SSL。
 
-| 接口 | 方法 | 描述 | 参数 |
-|------|------|------|------|
-| `/api/login` | POST | 用户登录 | `username`, `password` |
-| `/api/register` | POST | 用户注册 | `username`, `email`, `password`, `verification_code` |
-| `/api/logout` | GET | 用户登出 | - |
-| `/api/send-verification-code` | POST | 发送验证码 | `email` |
+**提示“页面验证已失效”**：刷新页面后重试，并确认请求保留 Cookie 且携带当前页面的 `X-CSRFToken`。登录、注册等公开写接口同样需要 CSRF Token。
 
-### 会话接口
+**多 worker 下限流不一致**：把 `RATELIMIT_STORAGE_URI` 指向所有 worker 共用的 Redis，并重启全部 worker。
 
-| 接口 | 方法 | 描述 |
-|------|------|------|
-| `/api/sessions` | GET | 获取会话列表 |
-| `/api/sessions` | POST | 创建新会话 |
-| `/api/sessions/<id>` | GET | 获取会话详情 |
-| `/api/sessions/<id>` | DELETE | 删除会话 |
-| `/api/sessions/<id>/title` | PUT | 更新会话标题 |
+## 许可证
 
-### 生成接口
-
-| 接口 | 方法 | 描述 | 参数 |
-|------|------|------|------|
-| `/api/generate` | POST | 生成图片 | `session_id`, `prompt`, `aspect_ratio`, `image_size`, `model`, `reference_images` |
-| `/api/models` | GET | 获取可用模型列表 | - |
-| `/api/redeem` | POST | 卡密充值 | `code` |
-
-### 管理员接口
-
-| 接口 | 方法 | 描述 |
-|------|------|------|
-| `/api/admin/users` | GET | 获取用户列表 |
-| `/api/admin/users/<id>` | DELETE | 删除用户 |
-| `/api/admin/users/<id>/credits` | POST | 充值点数 |
-| `/api/admin/users/<id>/toggle-admin` | POST | 切换管理员权限 |
-| `/api/admin/card-keys` | GET | 获取卡密列表 |
-| `/api/admin/card-keys` | POST | 生成卡密 |
-| `/api/admin/cleanup` | POST | 清理历史数据 |
-
-</details>
-
----
-
-## ⚠️ 注意事项
-
-1. **API Key 安全**
-   - 切勿将 `.env` 文件提交到 Git
-   - 不要在公开场合分享你的 API Key
-
-2. **数据备份**
-   - 定期备份 `data/` 目录
-   - 包含用户数据和会话记录
-
-3. **生产环境**
-   - 务必使用 HTTPS
-   - 设置 `FLASK_ENV=production`
-   - 使用 Gunicorn 而非 Flask 开发服务器
-
-4. **API 配额**
-   - 注意 Google Gemini API 的免费配额限制
-   - 超出配额需要付费或等待刷新
-
----
-
-## 📢 反馈
-
-如有问题或建议，欢迎提交 [Issue](https://github.com/gbmomo/gemini-image-webapp/issues)！
-
----
-
-## 📄 开源许可
-
-本项目采用 [CC BY-NC-SA 4.0 许可证](LICENSE) 开源。
-严禁任何形式的商业行为。
-
-**如果想商用，请联系作者购买商用许可。**
-
----
-
-## 📞 联系
-
-- **Email**: S@gitsay.com
-- **QQ**: 550948321
-- **WeChat**: Goblin_MoMo
-- **GitHub**: [@gbmomo](https://github.com/gbmomo)
+[CC BY-NC-SA 4.0](LICENSE)。未经单独商业授权，不得将本项目用于商业用途。

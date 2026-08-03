@@ -16,13 +16,23 @@ from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
-DATABASE_FILE = "data/users.db"
+DATABASE_FILE = os.getenv("DATABASE_FILE", "data/users.db")
+
+
+def _get_busy_timeout_ms():
+    try:
+        return max(0, int(os.getenv("DATABASE_BUSY_TIMEOUT_MS", "5000")))
+    except (TypeError, ValueError):
+        return 5000
 
 
 def get_db_connection():
     """获取数据库连接"""
-    conn = sqlite3.connect(DATABASE_FILE)
+    busy_timeout_ms = _get_busy_timeout_ms()
+    conn = sqlite3.connect(DATABASE_FILE, timeout=busy_timeout_ms / 1000)
     conn.row_factory = sqlite3.Row  # 返回字典形式的结果
+    conn.execute("PRAGMA foreign_keys = ON")
+    conn.execute(f"PRAGMA busy_timeout = {busy_timeout_ms}")
     return conn
 
 
@@ -40,12 +50,166 @@ def get_db():
         conn.close()
 
 
+def _create_card_keys_table(cursor, table_name="card_keys"):
+    cursor.execute(f'''
+        CREATE TABLE {table_name} (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            code_hash TEXT UNIQUE NOT NULL,
+            code_prefix TEXT,
+            fast_hash TEXT,
+            credits INTEGER NOT NULL,
+            is_used INTEGER DEFAULT 0,
+            used_by INTEGER,
+            used_at TIMESTAMP,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (used_by) REFERENCES users(id)
+        )
+    ''')
+
+
+def _migrate_card_keys_table(cursor):
+    """将任意已知旧版卡密表升级到标准结构，并尽量保留旧卡密。"""
+    table_exists = cursor.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='card_keys'"
+    ).fetchone()
+    if not table_exists:
+        _create_card_keys_table(cursor)
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_fast_hash ON card_keys(fast_hash)")
+        return
+
+    column_rows = cursor.execute("PRAGMA table_info(card_keys)").fetchall()
+    columns = {column["name"] for column in column_rows}
+    canonical_columns = {
+        "id", "code_hash", "code_prefix", "fast_hash", "credits",
+        "is_used", "used_by", "used_at", "created_at",
+    }
+    if columns == canonical_columns:
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_fast_hash ON card_keys(fast_hash)")
+        return
+
+    logger.warning("检测到旧版本卡密表，正在迁移并保留可恢复的数据...")
+    legacy_rows = cursor.execute("SELECT * FROM card_keys").fetchall()
+    valid_user_ids = {
+        row["id"] for row in cursor.execute("SELECT id FROM users").fetchall()
+    }
+
+    cursor.execute("DROP TABLE IF EXISTS card_keys_new")
+    _create_card_keys_table(cursor, "card_keys_new")
+    for row in legacy_rows:
+        row_keys = set(row.keys())
+        plain_code = row["code"] if "code" in row_keys else None
+        normalized_code = plain_code.strip().upper() if plain_code else None
+        code_hash = row["code_hash"] if "code_hash" in row_keys else None
+        if not code_hash and normalized_code:
+            code_hash = generate_password_hash(normalized_code)
+        if not code_hash:
+            logger.warning("跳过无法恢复的旧卡密记录 id=%s", row["id"] if "id" in row_keys else None)
+            continue
+
+        code_prefix = row["code_prefix"] if "code_prefix" in row_keys else None
+        fast_hash = row["fast_hash"] if "fast_hash" in row_keys else None
+        if normalized_code:
+            code_prefix = code_prefix or normalized_code[:4]
+            fast_hash = fast_hash or hashlib.sha256(normalized_code.encode()).hexdigest()
+
+        used_by = row["used_by"] if "used_by" in row_keys else None
+        if used_by not in valid_user_ids:
+            used_by = None
+
+        cursor.execute(
+            '''INSERT INTO card_keys_new
+               (id, code_hash, code_prefix, fast_hash, credits, is_used,
+                used_by, used_at, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+            (
+                row["id"] if "id" in row_keys else None,
+                code_hash,
+                code_prefix,
+                fast_hash,
+                row["credits"] if "credits" in row_keys and row["credits"] is not None else 0,
+                row["is_used"] if "is_used" in row_keys and row["is_used"] is not None else 0,
+                used_by,
+                row["used_at"] if "used_at" in row_keys else None,
+                row["created_at"] if "created_at" in row_keys else datetime.now().isoformat(),
+            ),
+        )
+
+    cursor.execute("DROP TABLE card_keys")
+    cursor.execute("ALTER TABLE card_keys_new RENAME TO card_keys")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_fast_hash ON card_keys(fast_hash)")
+
+
+def _create_model_pricing_table(cursor, table_name="model_pricing"):
+    cursor.execute(f'''
+        CREATE TABLE {table_name} (
+            model_id TEXT NOT NULL,
+            image_size TEXT NOT NULL,
+            credits INTEGER NOT NULL CHECK (credits >= 0),
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (model_id, image_size)
+        )
+    ''')
+
+
+def _migrate_model_pricing_table(cursor):
+    """重建旧定价表，移除会阻止新 UPSERT 的遗留 NOT NULL 列。"""
+    table_exists = cursor.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='model_pricing'"
+    ).fetchone()
+    if not table_exists:
+        _create_model_pricing_table(cursor)
+        return
+
+    column_rows = cursor.execute("PRAGMA table_info(model_pricing)").fetchall()
+    columns = {column["name"] for column in column_rows}
+    primary_key = {
+        column["name"]: column["pk"] for column in column_rows if column["pk"]
+    }
+    canonical_columns = {"model_id", "image_size", "credits", "updated_at"}
+    if columns == canonical_columns and primary_key == {"model_id": 1, "image_size": 2}:
+        return
+
+    legacy_rows = cursor.execute("SELECT * FROM model_pricing").fetchall()
+    cursor.execute("DROP TABLE IF EXISTS model_pricing_new")
+    _create_model_pricing_table(cursor, "model_pricing_new")
+    for row in legacy_rows:
+        row_keys = set(row.keys())
+        model_id = row["model_id"] if "model_id" in row_keys else None
+        image_size = row["image_size"] if "image_size" in row_keys else None
+        if not image_size and "resolution" in row_keys:
+            image_size = row["resolution"]
+        credits = row["credits"] if "credits" in row_keys else None
+        if credits is None and "price" in row_keys:
+            credits = row["price"]
+        if not model_id or not image_size:
+            logger.warning("跳过缺少模型或分辨率的旧定价记录")
+            continue
+        try:
+            credits = max(0, int(credits if credits is not None else 1))
+        except (TypeError, ValueError):
+            credits = 1
+        updated_at = row["updated_at"] if "updated_at" in row_keys else None
+        cursor.execute(
+            '''INSERT INTO model_pricing_new (model_id, image_size, credits, updated_at)
+               VALUES (?, ?, ?, ?)
+               ON CONFLICT(model_id, image_size) DO UPDATE SET
+                   credits=excluded.credits, updated_at=excluded.updated_at''',
+            (model_id, image_size, credits, updated_at or datetime.now().isoformat()),
+        )
+
+    cursor.execute("DROP TABLE model_pricing")
+    cursor.execute("ALTER TABLE model_pricing_new RENAME TO model_pricing")
+
+
 def init_db():
     """初始化数据库，创建用户表"""
-    os.makedirs("data", exist_ok=True)
+    database_directory = os.path.dirname(os.path.abspath(DATABASE_FILE))
+    if database_directory:
+        os.makedirs(database_directory, exist_ok=True)
     with get_db() as conn:
         # 启用 WAL 模式提升并发性能（数据库级别持久设置，只需设置一次）
         conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("BEGIN IMMEDIATE")
         cursor = conn.cursor()
         
         # 检查表是否存在，如果存在检查是否有 is_admin 列
@@ -76,53 +240,32 @@ def init_db():
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             ''')
+
+        # 生成扣费账本：先预留点数，生成成功后提交，失败或超时则退款。
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS generation_charges (
+                charge_id TEXT PRIMARY KEY,
+                user_id INTEGER NOT NULL,
+                credits INTEGER NOT NULL CHECK (credits > 0),
+                status TEXT NOT NULL DEFAULT 'pending'
+                    CHECK (status IN ('pending', 'committed', 'refunded')),
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                expires_at TIMESTAMP NOT NULL,
+                resolved_at TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            )
+        ''')
+        cursor.execute('''
+            CREATE INDEX IF NOT EXISTS idx_generation_charges_pending
+            ON generation_charges(status) WHERE status = 'pending'
+        ''')
+        cursor.execute('''
+            CREATE INDEX IF NOT EXISTS idx_generation_charges_expires
+            ON generation_charges(expires_at) WHERE status = 'pending'
+        ''')
         
         # 创建/迁移卡密表（哈希存储）
-        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='card_keys'")
-        table_exists = cursor.fetchone()
-        
-        if table_exists:
-            cursor.execute("PRAGMA table_info(card_keys)")
-            columns = [col[1] for col in cursor.fetchall()]
-            
-            if 'code' in columns and 'code_hash' not in columns:
-                logger.warning("检测到旧版本卡密表（明文存储），正在升级到安全的哈希存储...")
-                cursor.execute("DROP TABLE card_keys")
-                cursor.execute('''
-                    CREATE TABLE card_keys (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        code_hash TEXT UNIQUE NOT NULL,
-                        code_prefix TEXT,
-                        fast_hash TEXT,
-                        credits INTEGER NOT NULL,
-                        is_used INTEGER DEFAULT 0,
-                        used_by INTEGER,
-                        used_at TIMESTAMP,
-                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                        FOREIGN KEY (used_by) REFERENCES users(id)
-                    )
-                ''')
-                logger.info("卡密表已升级，所有旧卡密已清空（安全考虑）")
-            
-            if 'fast_hash' not in columns:
-                cursor.execute("ALTER TABLE card_keys ADD COLUMN fast_hash TEXT")
-                cursor.execute("CREATE INDEX IF NOT EXISTS idx_fast_hash ON card_keys(fast_hash)")
-        else:
-            cursor.execute('''
-                CREATE TABLE card_keys (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    code_hash TEXT UNIQUE NOT NULL,
-                    code_prefix TEXT,
-                    fast_hash TEXT,
-                    credits INTEGER NOT NULL,
-                    is_used INTEGER DEFAULT 0,
-                    used_by INTEGER,
-                    used_at TIMESTAMP,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (used_by) REFERENCES users(id)
-                )
-            ''')
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_fast_hash ON card_keys(fast_hash)")
+        _migrate_card_keys_table(cursor)
         
         # 创建邮箱验证码表
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='verification_codes'")
@@ -142,38 +285,113 @@ def init_db():
             cursor.execute("CREATE INDEX idx_email ON verification_codes(email)")
             cursor.execute("CREATE INDEX idx_expires_at ON verification_codes(expires_at)")
 
+        # 创建 API 设置表
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='api_settings'")
+        table_exists = cursor.fetchone()
+
+        if not table_exists:
+            cursor.execute('''
+                CREATE TABLE api_settings (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    provider TEXT NOT NULL DEFAULT 'google_ai',
+                    api_key TEXT NOT NULL,
+                    custom_base_url TEXT,
+                    vertex_project TEXT,
+                    vertex_location TEXT,
+                    default_model TEXT DEFAULT 'gemini-3.1-flash-image',
+                    email_sender TEXT,
+                    email_password TEXT,
+                    smtp_server TEXT,
+                    smtp_port INTEGER,
+                    is_active INTEGER DEFAULT 1,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+        else:
+            # 检查是否需要增加新字段（数据库迁移）
+            cursor.execute("PRAGMA table_info(api_settings)")
+            columns = [column["name"] for column in cursor.fetchall()]
+            if "default_model" not in columns:
+                cursor.execute("ALTER TABLE api_settings ADD COLUMN default_model TEXT DEFAULT 'gemini-3.1-flash-image'")
+            if "email_sender" not in columns:
+                cursor.execute("ALTER TABLE api_settings ADD COLUMN email_sender TEXT")
+            if "email_password" not in columns:
+                cursor.execute("ALTER TABLE api_settings ADD COLUMN email_password TEXT")
+            if "smtp_server" not in columns:
+                cursor.execute("ALTER TABLE api_settings ADD COLUMN smtp_server TEXT")
+            if "smtp_port" not in columns:
+                cursor.execute("ALTER TABLE api_settings ADD COLUMN smtp_port INTEGER")
+
+        # 模型定价表：价格以站内点数为单位，按「模型 + 输出分辨率」独立维护。
+        _migrate_model_pricing_table(cursor)
 
 def create_admin_user():
     """创建管理员账号（如果不存在）"""
     with get_db() as conn:
+        # 串行化“检查并创建”，避免多个 worker 同时启动时争抢 admin 用户名。
+        conn.execute("BEGIN IMMEDIATE")
         cursor = conn.cursor()
-        
-        # 检查 admin 是否已存在
-        cursor.execute("SELECT id FROM users WHERE username = ?", ("admin",))
-        if cursor.fetchone() is None:
-            # 从环境变量获取管理员密码
-            admin_password = os.getenv("ADMIN_PASSWORD")
-            
-            if not admin_password:
-                # 如果未设置，生成随机密码并输出警告
-                admin_password = ''.join(secrets.choice(string.ascii_letters + string.digits + string.punctuation) for _ in range(16))
-                logger.warning("=" * 60)
-                logger.warning("⚠️  警告：未设置 ADMIN_PASSWORD 环境变量！")
-                logger.warning(f"⚠️  已自动生成管理员密码: {admin_password}")
-                logger.warning("⚠️  请立即保存此密码，并在首次登录后修改！")
-                logger.warning("⚠️  建议：在 .env 文件中设置 ADMIN_PASSWORD=your_password")
-                logger.warning("=" * 60)
-            
-            # 创建 admin 用户
-            password_hash = generate_password_hash(admin_password)
-            cursor.execute(
-                "INSERT INTO users (username, password_hash, is_admin) VALUES (?, ?, ?)",
-                ("admin", password_hash, 1)
+        admin = cursor.execute(
+            "SELECT id FROM users WHERE username = ?", ("admin",)
+        ).fetchone()
+        configured_password = os.getenv("ADMIN_PASSWORD")
+
+        if admin is not None:
+            if configured_password:
+                cursor.execute(
+                    "UPDATE users SET password_hash = ?, is_admin = 1 WHERE id = ?",
+                    (generate_password_hash(configured_password), admin["id"]),
+                )
+            else:
+                cursor.execute("UPDATE users SET is_admin = 1 WHERE id = ?", (admin["id"],))
+            return
+
+        admin_password = configured_password
+        if not admin_password:
+            admin_password = ''.join(
+                secrets.choice(string.ascii_letters + string.digits + string.punctuation)
+                for _ in range(16)
             )
-            logger.info("✅ 管理员账号创建成功: admin")
-        else:
-            # 确保 admin 有管理员权限
-            cursor.execute("UPDATE users SET is_admin = 1 WHERE username = ?", ("admin",))
+            logger.warning("=" * 60)
+            logger.warning("⚠️  警告：未设置 ADMIN_PASSWORD 环境变量！")
+            logger.warning(f"⚠️  已自动生成管理员密码: {admin_password}")
+            logger.warning("⚠️  请立即保存此密码，并在首次登录后修改！")
+            logger.warning("⚠️  建议：在 .env 文件中设置 ADMIN_PASSWORD=your_password")
+            logger.warning("=" * 60)
+
+        cursor.execute(
+            "INSERT INTO users (username, password_hash, is_admin) VALUES (?, ?, ?)",
+            ("admin", generate_password_hash(admin_password), 1),
+        )
+        logger.info("✅ 管理员账号创建成功: admin")
+
+
+def _validate_user_fields(username, password, email=None):
+    if not isinstance(username, str) or not isinstance(password, str) or not username or not password:
+        return "用户名和密码不能为空"
+    if len(username) < 3:
+        return "用户名至少需要3个字符"
+    if len(username) > 64:
+        return "用户名最多64个字符"
+    if len(password) < 6:
+        return "密码至少需要6个字符"
+    if len(password) > 256:
+        return "密码最多256个字符"
+    if not re.search(r'[a-zA-Z]', password) or not re.search(r'[0-9]', password):
+        return "密码必须同时包含字母和数字"
+    if email:
+        if not isinstance(email, str):
+            return "邮箱格式不正确"
+        if len(email) > 254:
+            return "邮箱格式不正确"
+        email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+        if not re.fullmatch(email_pattern, email):
+            return "邮箱格式不正确"
+    return None
+
+
+def _user_integrity_error_message(error):
+    return "邮箱已被使用" if "email" in str(error).lower() else "用户名已存在"
 
 
 def create_user(username, password, email=None):
@@ -181,24 +399,9 @@ def create_user(username, password, email=None):
     创建新用户
     返回: (success: bool, message: str, user_id: int or None)
     """
-    if not username or not password:
-        return False, "用户名和密码不能为空", None
-    
-    if len(username) < 3:
-        return False, "用户名至少需要3个字符", None
-    
-    if len(password) < 6:
-        return False, "密码至少需要6个字符", None
-    
-    # 密码复杂度校验：必须包含字母和数字
-    if not re.search(r'[a-zA-Z]', password) or not re.search(r'[0-9]', password):
-        return False, "密码必须同时包含字母和数字", None
-    
-    # 验证邮箱格式（如果提供）
-    if email:
-        email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
-        if not re.match(email_pattern, email):
-            return False, "邮箱格式不正确", None
+    validation_error = _validate_user_fields(username, password, email)
+    if validation_error:
+        return False, validation_error, None
     
     try:
         with get_db() as conn:
@@ -211,9 +414,7 @@ def create_user(username, password, email=None):
             user_id = cursor.lastrowid
             return True, "注册成功", user_id
     except sqlite3.IntegrityError as e:
-        if 'email' in str(e):
-            return False, "邮箱已被使用", None
-        return False, "用户名已存在", None
+        return False, _user_integrity_error_message(e), None
 
 
 def verify_user(username, password):
@@ -281,14 +482,19 @@ def get_all_users():
 def delete_user(user_id):
     """删除用户（管理员功能）"""
     with get_db() as conn:
+        conn.execute("BEGIN IMMEDIATE")
         cursor = conn.cursor()
         
         # 不能删除管理员
         cursor.execute("SELECT is_admin FROM users WHERE id = ?", (user_id,))
         user = cursor.fetchone()
-        if user and user["is_admin"] == 1:
+        if user is None:
+            return False, "用户不存在"
+        if user["is_admin"] == 1:
             return False, "不能删除管理员账号"
-        
+
+        # 卡密保留使用状态，但解除外键引用，避免历史充值记录阻止删号。
+        cursor.execute("UPDATE card_keys SET used_by = NULL WHERE used_by = ?", (user_id,))
         cursor.execute("DELETE FROM users WHERE id = ?", (user_id,))
     return True, "用户已删除"
 
@@ -315,8 +521,10 @@ def toggle_admin(user_id):
 
 
 def update_user_credits(user_id, amount):
-    """更新用户点数（增加或减少）"""
+    """原子更新用户点数；余额不足时拒绝扣减。"""
     with get_db() as conn:
+        # 防止两个生成请求同时读到同一份旧余额后都扣款成功。
+        conn.execute("BEGIN IMMEDIATE")
         cursor = conn.cursor()
         
         # 获取当前点数
@@ -329,11 +537,119 @@ def update_user_credits(user_id, amount):
         current_credits = result["credits"]
         new_credits = current_credits + amount
         if new_credits < 0:
-            new_credits = 0
+            return False, "点数不足", current_credits
             
         cursor.execute("UPDATE users SET credits = ? WHERE id = ?", (new_credits, user_id))
     
     return True, "更新成功", new_credits
+
+
+def reserve_generation_credits(user_id, credits, charge_id, expires_at):
+    """原子扣除生成点数并创建 pending 账单。"""
+    if (not isinstance(credits, int) or isinstance(credits, bool)
+            or credits <= 0):
+        return False, "扣费点数必须大于0", 0
+    if not isinstance(charge_id, str) or not charge_id.strip():
+        return False, "无效的扣费记录ID", 0
+    if not isinstance(expires_at, str) or not expires_at.strip():
+        return False, "无效的扣费过期时间", 0
+
+    with get_db() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        cursor = conn.cursor()
+        existing = cursor.execute(
+            "SELECT charge_id FROM generation_charges WHERE charge_id = ?",
+            (charge_id,),
+        ).fetchone()
+        if existing is not None:
+            user = cursor.execute(
+                "SELECT credits FROM users WHERE id = ?", (user_id,)
+            ).fetchone()
+            return (
+                False,
+                "扣费记录已存在",
+                user["credits"] if user is not None else 0,
+            )
+
+        cursor.execute(
+            '''UPDATE users SET credits = credits - ?
+               WHERE id = ? AND credits >= ?''',
+            (credits, user_id, credits),
+        )
+        if cursor.rowcount != 1:
+            user = cursor.execute(
+                "SELECT credits FROM users WHERE id = ?", (user_id,)
+            ).fetchone()
+            if user is None:
+                return False, "用户不存在", 0
+            return False, "点数不足", user["credits"]
+
+        cursor.execute(
+            '''INSERT INTO generation_charges
+               (charge_id, user_id, credits, status, expires_at)
+               VALUES (?, ?, ?, 'pending', ?)''',
+            (charge_id, user_id, credits, expires_at),
+        )
+        remaining_credits = cursor.execute(
+            "SELECT credits FROM users WHERE id = ?", (user_id,)
+        ).fetchone()["credits"]
+        return True, "点数已预留", remaining_credits
+
+
+def resolve_generation_charge(charge_id, refund):
+    """幂等地提交或退款一笔 pending 生成扣费。"""
+    if not isinstance(charge_id, str) or not charge_id.strip():
+        return False, "无效的扣费记录ID"
+    if not isinstance(refund, bool):
+        return False, "无效的结算类型"
+
+    target_status = "refunded" if refund else "committed"
+    with get_db() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        cursor = conn.cursor()
+        charge = cursor.execute(
+            '''SELECT charge_id, user_id, credits, status
+               FROM generation_charges WHERE charge_id = ?''',
+            (charge_id,),
+        ).fetchone()
+        if charge is None:
+            return False, "扣费记录不存在"
+        if charge["status"] == target_status:
+            return True, "扣费记录已结算"
+        if charge["status"] != "pending":
+            return False, f"扣费记录已{charge['status']}，不能重复结算"
+
+        if refund:
+            cursor.execute(
+                "UPDATE users SET credits = credits + ? WHERE id = ?",
+                (charge["credits"], charge["user_id"]),
+            )
+            if cursor.rowcount != 1:
+                return False, "退款用户不存在"
+
+        cursor.execute(
+            '''UPDATE generation_charges
+               SET status = ?, resolved_at = ?
+               WHERE charge_id = ? AND status = 'pending' ''',
+            (target_status, datetime.now().isoformat(), charge_id),
+        )
+        if cursor.rowcount != 1:
+            raise RuntimeError("生成扣费记录并发结算失败")
+        return True, "扣费已退款" if refund else "扣费已提交"
+
+
+def get_stale_generation_charges(now_iso):
+    """返回截至指定时间已经过期但仍未结算的生成扣费。"""
+    with get_db() as conn:
+        rows = conn.execute(
+            '''SELECT charge_id, user_id, credits, status,
+                      created_at, expires_at, resolved_at
+               FROM generation_charges
+               WHERE status = 'pending' AND expires_at <= ?
+               ORDER BY expires_at, charge_id''',
+            (now_iso,),
+        ).fetchall()
+    return [dict(row) for row in rows]
 
 
 def generate_card_key_code(length=16):
@@ -429,6 +745,8 @@ def use_card_key(code, user_id):
     fast_hash = hashlib.sha256(code.encode()).hexdigest()
     
     with get_db() as conn:
+        # 序列化“检查未使用 -> 标记使用 -> 充值”，避免同一卡密并发兑换。
+        conn.execute("BEGIN IMMEDIATE")
         cursor = conn.cursor()
         
         # 用 fast_hash 精确定位（O(1) 查找，不再全表扫描）
@@ -490,42 +808,97 @@ def create_verification_code(email, code_hash, expires_at):
         return False, f"创建验证码失败: {str(e)}"
 
 
+def delete_verification_code(email, code_hash):
+    """删除尚未使用的指定验证码，供邮件发送失败时回滚。"""
+    with get_db() as conn:
+        cursor = conn.execute(
+            "DELETE FROM verification_codes WHERE email = ? AND code_hash = ? AND used = 0",
+            (email, code_hash),
+        )
+        return cursor.rowcount > 0
+
+
+def _get_latest_verification_code(cursor, email):
+    return cursor.execute(
+        '''SELECT * FROM verification_codes
+           WHERE email = ? AND used = 0
+           ORDER BY created_at DESC, id DESC
+           LIMIT 1''',
+        (email,),
+    ).fetchone()
+
+
+def _check_verification_record(record, code):
+    if record is None:
+        return "验证码不存在或已使用"
+    try:
+        expires_at = datetime.fromisoformat(record["expires_at"])
+    except (TypeError, ValueError):
+        return "验证码已过期，请重新获取"
+    if datetime.now() > expires_at:
+        return "验证码已过期，请重新获取"
+    if not check_password_hash(record["code_hash"], code):
+        return "验证码错误"
+    return None
+
+
 def verify_email_code(email, code):
     """
     验证邮箱验证码
     返回: (success: bool, message: str)
     """
     with get_db() as conn:
+        # 同一验证码只能由一个并发请求完成“验证并消费”。
+        conn.execute("BEGIN IMMEDIATE")
         cursor = conn.cursor()
-        
-        # 获取该邮箱最新的未使用验证码
-        cursor.execute("""
-            SELECT * FROM verification_codes 
-            WHERE email = ? AND used = 0 
-            ORDER BY created_at DESC 
-            LIMIT 1
-        """, (email,))
-        
-        record = cursor.fetchone()
-        
-        if record is None:
+        record = _get_latest_verification_code(cursor, email)
+        verification_error = _check_verification_record(record, code)
+        if verification_error:
+            return False, verification_error
+
+        cursor.execute(
+            "UPDATE verification_codes SET used = 1 WHERE id = ? AND used = 0",
+            (record["id"],),
+        )
+        if cursor.rowcount != 1:
             return False, "验证码不存在或已使用"
-        
-        # 检查是否过期
-        expires_at = datetime.fromisoformat(record["expires_at"])
-        if datetime.now() > expires_at:
-            return False, "验证码已过期，请重新获取"
-        
-        # 验证验证码
-        if check_password_hash(record["code_hash"], code):
-            # 标记为已使用
+        return True, "验证成功"
+
+
+def register_user_with_verification_code(username, password, email, code):
+    """在一个事务中验证验证码、创建用户并消费验证码。"""
+    validation_error = _validate_user_fields(username, password, email)
+    if validation_error:
+        return False, validation_error, None
+    if not email or not code:
+        return False, "请输入邮箱和验证码", None
+
+    try:
+        with get_db() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            cursor = conn.cursor()
+            record = _get_latest_verification_code(cursor, email)
+            verification_error = _check_verification_record(record, code)
+            if verification_error:
+                return False, verification_error, None
+
             cursor.execute(
-                "UPDATE verification_codes SET used = 1 WHERE id = ?",
-                (record["id"],)
+                "UPDATE verification_codes SET used = 1 WHERE id = ? AND used = 0",
+                (record["id"],),
             )
-            return True, "验证成功"
-        else:
-            return False, "验证码错误"
+            if cursor.rowcount != 1:
+                return False, "验证码不存在或已使用", None
+
+            cursor.execute(
+                '''INSERT INTO users
+                   (username, email, password_hash, is_admin, credits)
+                   VALUES (?, ?, ?, 0, 4)''',
+                (username, email, generate_password_hash(password)),
+            )
+            return True, "注册成功", cursor.lastrowid
+    except sqlite3.IntegrityError as error:
+        # 上下文管理器会回滚验证码的 used 标记。
+        return False, _user_integrity_error_message(error), None
 
 
 def cleanup_expired_codes():
@@ -542,6 +915,98 @@ def cleanup_expired_codes():
         deleted_count = cursor.rowcount
     
     return deleted_count
+
+
+def get_active_api_settings():
+    """获取当前激活的 API 设置"""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM api_settings WHERE is_active = 1 ORDER BY updated_at DESC LIMIT 1")
+        row = cursor.fetchone()
+
+    if row:
+        return {
+            "id": row["id"],
+            "provider": row["provider"],
+            "api_key": row["api_key"],
+            "custom_base_url": row["custom_base_url"],
+            "default_model": row["default_model"] if "default_model" in row.keys() else 'gemini-3.1-flash-image',
+            "email_sender": row["email_sender"] if "email_sender" in row.keys() else None,
+            "email_password": row["email_password"] if "email_password" in row.keys() else None,
+            "smtp_server": row["smtp_server"] if "smtp_server" in row.keys() else None,
+            "smtp_port": row["smtp_port"] if "smtp_port" in row.keys() else None,
+            "is_active": row["is_active"] == 1,
+            "updated_at": row["updated_at"]
+        }
+    return None
+
+
+def save_api_settings(provider, api_key, custom_base_url=None, default_model='gemini-3.1-flash-image', email_sender=None, email_password=None, smtp_server=None, smtp_port=None):
+    """
+    保存 API 设置（更新或插入）
+    返回: (success: bool, message: str)
+    """
+    if not provider or provider not in ('google_ai', 'custom'):
+        return False, "无效的服务商类型"
+
+    if not api_key or not api_key.strip():
+        return False, "API Key 不能为空"
+
+    if provider == 'custom' and (not custom_base_url or not custom_base_url.strip()):
+        return False, "自定义模式下必须填写 API 端点 URL"
+
+
+    try:
+        with get_db() as conn:
+            cursor = conn.cursor()
+
+            # 将所有现有设置设为非激活
+            cursor.execute("UPDATE api_settings SET is_active = 0")
+
+            # 插入新的激活设置
+            cursor.execute(
+                "INSERT INTO api_settings (provider, api_key, custom_base_url, default_model, email_sender, email_password, smtp_server, smtp_port, is_active, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?)",
+                (
+                    provider,
+                    api_key.strip(),
+                    custom_base_url.strip() if custom_base_url else None,
+                    default_model.strip() if default_model else 'gemini-3.1-flash-image',
+                    email_sender.strip() if email_sender else None,
+                    email_password.strip() if email_password else None,
+                    smtp_server.strip() if smtp_server else None,
+                    int(smtp_port) if smtp_port else None,
+                    datetime.now().isoformat()
+                )
+            )
+        return True, "API 设置已保存"
+    except Exception as e:
+        logger.error(f"保存 API 设置失败: {e}")
+        return False, f"保存失败: {str(e)}"
+
+
+def get_model_pricing():
+    """返回已配置的所有模型分辨率价格。"""
+    with get_db() as conn:
+        rows = conn.execute("SELECT model_id, image_size, credits FROM model_pricing").fetchall()
+    return {(row["model_id"], row["image_size"]): row["credits"] for row in rows}
+
+
+def save_model_pricing(prices):
+    """原子性保存价格字典，键为 (model_id, image_size)。"""
+    try:
+        with get_db() as conn:
+            conn.executemany(
+                """INSERT INTO model_pricing (model_id, image_size, credits, updated_at)
+                   VALUES (?, ?, ?, ?)
+                   ON CONFLICT(model_id, image_size) DO UPDATE SET
+                       credits=excluded.credits, updated_at=excluded.updated_at""",
+                [(model_id, image_size, credits, datetime.now().isoformat())
+                 for (model_id, image_size), credits in prices.items()]
+            )
+        return True, "模型价格已保存"
+    except Exception as e:
+        logger.error(f"保存模型价格失败: {e}")
+        return False, f"保存失败: {str(e)}"
 
 
 # 应用启动时自动初始化数据库
