@@ -34,7 +34,8 @@
 ## 当前功能
 
 - 文生图、参考图生图和带上下文的多轮图片迭代。参考图可通过文件选择、拖拽或粘贴添加。
-- 每个用户可创建、切换和删除多个会话；首轮成功后以提示词前 20 个字符自动命名，并锁定模型、分辨率和比例，如需更改必须新建会话。后端另提供标题修改接口，但当前界面没有重命名入口。
+- 首页允许匿名浏览、填写提示词和选择生成参数；新建会话、上传参考图或生成图片时才要求登录。匿名草稿会在登录后恢复，但不会自动生成或扣点。
+- 每个用户可创建、切换和删除多个会话；首轮成功后以提示词前 20 个字符自动命名，并锁定模型、思考强度、分辨率和比例，如需更改必须新建会话。后端另提供标题修改接口，但当前界面没有重命名入口。
 - 提供中文和英文切换，默认语言在 `static/js/i18n.js` 的 `DEFAULT_LANG` 中设置。
 - 邮箱验证码注册、用户名密码登录、退出登录和基于签名 Cookie 的登录会话。
 - 新用户默认赠送 4 点；普通用户按“模型 + 分辨率”扣点，管理员生成不扣点。
@@ -48,14 +49,14 @@
 
 ## 模型能力
 
-模型、分辨率、比例和参考图数量都由后端能力矩阵校验，不只是前端选项限制。
+模型、思考强度、分辨率、比例和参考图数量都由后端能力矩阵校验，不只是前端选项限制。
 
-| 模型 ID | 界面名称 | 分辨率 | 最大参考图数 | 支持比例 |
-|---|---|---:|---:|---|
-| `gemini-3.1-flash-lite-image` | Nano Banana 2 Lite | 1K | 14 | 通用比例 |
-| `gemini-3.1-flash-image` | Nano Banana 2 | 512、1K、2K、4K | 14 | 通用比例，另含 1:4、1:8、4:1、8:1 |
-| `gemini-3-pro-image` | Nano Banana Pro | 1K、2K、4K | 14 | 通用比例 |
-| `gemini-2.5-flash-image` | Nano Banana | 1K | 3 | 通用比例 |
+| 模型 ID | 界面名称 | 分辨率 | 思考强度 | 最大参考图数 | 支持比例 |
+|---|---|---:|---|---:|---|
+| `gemini-3.1-flash-lite-image` | Nano Banana 2 Lite | 1K | `minimal`、`high` | 14 | 通用比例 |
+| `gemini-3.1-flash-image` | Nano Banana 2 | 512、1K、2K、4K | `minimal`、`high` | 14 | 通用比例，另含 1:4、1:8、4:1、8:1 |
+| `gemini-3-pro-image` | Nano Banana Pro | 1K、2K、4K | 自动，不可调整 | 14 | 通用比例 |
+| `gemini-2.5-flash-image` | Nano Banana | 1K | 不可调整 | 3 | 通用比例 |
 
 通用比例为：`1:1`、`2:3`、`3:2`、`3:4`、`4:3`、`4:5`、`5:4`、`9:16`、`16:9`、`21:9`。
 
@@ -631,7 +632,7 @@ Redis 应只监听本机或可信内网，绝不能把 6379 端口直接开放�
 | GET / POST | `/api/admin/api-settings` | 管理员 | 查看或保存 API/SMTP 设置 |
 | GET / PUT | `/api/admin/model-pricing` | 管理员 | 查看或保存模型价格 |
 
-主要 JSON 写入字段如下：登录为 `username`、`password`；发验证码为 `email`；注册为 `username`、`email`、`password`、`verification_code`；修改标题为 `title`；生成图片为 `session_id`、`prompt`、`model`、`image_size`、`aspect_ratio`、`reference_images`；兑换为 `code`；管理员点数调整为 `amount`；清理为 `cutoff_date`；生成卡密为 `credits`、`count`；API/SMTP 设置为 `provider`、`api_key`、`custom_base_url`、`default_model`、`email_sender`、`email_password`、`smtp_server`、`smtp_port`；模型定价为 `prices` 数组，其中每项包含 `model_id`、`image_size`、`credits`。
+主要 JSON 写入字段如下：登录为 `username`、`password`；发验证码为 `email`；注册为 `username`、`email`、`password`、`verification_code`；修改标题为 `title`；生成图片为 `session_id`、`prompt`、`model`、`thinking_level`、`image_size`、`aspect_ratio`、`reference_images`；兑换为 `code`；管理员点数调整为 `amount`；清理为 `cutoff_date`；生成卡密为 `credits`、`count`；API/SMTP 设置为 `provider`、`api_key`、`custom_base_url`、`default_model`、`email_sender`、`email_password`、`smtp_server`、`smtp_port`；模型定价为 `prices` 数组，其中每项包含 `model_id`、`image_size`、`credits`。
 
 ## 项目结构
 

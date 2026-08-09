@@ -9,6 +9,7 @@ const state = {
     referenceImages: [],  // 改为数组，支持多张
     selectedResolution: '1K',
     selectedAspectRatio: '1:1',
+    selectedThinkingLevel: 'minimal',
     selectedModel: window.DEFAULT_MODEL || 'gemini-3.1-flash-image',  // 从后端环境变量读取默认模型
     models: [],
     modelConfigAvailable: false,
@@ -22,10 +23,10 @@ const state = {
 
 // 服务端暂时不可用时仍可渲染可选项；正常情况下价格和能力始终以 /api/models 为准。
 const FALLBACK_MODELS = [
-    { id: 'gemini-3.1-flash-lite-image', name: 'Nano Banana 2 Lite', sizes: [{ id: '1K', credits: 1 }], ratios: ['1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'], max_references: 14 },
-    { id: 'gemini-3.1-flash-image', name: 'Nano Banana 2', sizes: [{ id: '512', credits: 1 }, { id: '1K', credits: 1 }, { id: '2K', credits: 2 }, { id: '4K', credits: 4 }], ratios: ['1:1', '1:4', '1:8', '2:3', '3:2', '3:4', '4:1', '4:3', '4:5', '5:4', '8:1', '9:16', '16:9', '21:9'], max_references: 14 },
-    { id: 'gemini-3-pro-image', name: 'Nano Banana Pro', sizes: [{ id: '1K', credits: 1 }, { id: '2K', credits: 2 }, { id: '4K', credits: 4 }], ratios: ['1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'], max_references: 14 },
-    { id: 'gemini-2.5-flash-image', name: 'Nano Banana', sizes: [{ id: '1K', credits: 1 }], ratios: ['1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'], max_references: 3 }
+    { id: 'gemini-3.1-flash-lite-image', name: 'Nano Banana 2 Lite', sizes: [{ id: '1K', credits: 1 }], ratios: ['1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'], max_references: 14, thinking_levels: ['minimal', 'high'], default_thinking_level: 'minimal' },
+    { id: 'gemini-3.1-flash-image', name: 'Nano Banana 2', sizes: [{ id: '512', credits: 1 }, { id: '1K', credits: 1 }, { id: '2K', credits: 2 }, { id: '4K', credits: 4 }], ratios: ['1:1', '1:4', '1:8', '2:3', '3:2', '3:4', '4:1', '4:3', '4:5', '5:4', '8:1', '9:16', '16:9', '21:9'], max_references: 14, thinking_levels: ['minimal', 'high'], default_thinking_level: 'minimal' },
+    { id: 'gemini-3-pro-image', name: 'Nano Banana Pro', sizes: [{ id: '1K', credits: 1 }, { id: '2K', credits: 2 }, { id: '4K', credits: 4 }], ratios: ['1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'], max_references: 14, thinking_levels: [], default_thinking_level: null },
+    { id: 'gemini-2.5-flash-image', name: 'Nano Banana', sizes: [{ id: '1K', credits: 1 }], ratios: ['1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'], max_references: 3, thinking_levels: [], default_thinking_level: null }
 ];
 
 // 会话数据缓存（避免重复加载，LRU 策略限制最多 50 个）
@@ -33,6 +34,7 @@ const sessionCache = new Map();
 const SESSION_CACHE_MAX = 50;
 const MAX_REFERENCE_FILE_BYTES = 10 * 1024 * 1024;
 const MAX_REFERENCE_TOTAL_BYTES = 35 * 1024 * 1024;
+const GUEST_DRAFT_KEY = 'nano_banana_guest_draft';
 let imageModalReturnFocus = null;
 
 function apiFetch(url, options = {}) {
@@ -49,13 +51,90 @@ function apiFetch(url, options = {}) {
 
 window.apiFetch = apiFetch;
 
-function handleUnauthorized() {
+function saveGuestDraft() {
+    if (window.IS_AUTHENTICATED) return;
+    try {
+        sessionStorage.setItem(GUEST_DRAFT_KEY, JSON.stringify({
+            prompt: elements.promptInput?.value || '',
+            model: state.selectedModel,
+            thinking_level: state.selectedThinkingLevel,
+            image_size: state.selectedResolution,
+            aspect_ratio: state.selectedAspectRatio
+        }));
+    } catch (error) {
+        console.warn('Unable to save the guest draft:', error);
+    }
+}
+
+window.saveGuestDraft = saveGuestDraft;
+
+function showAuthentication(mode = 'login', saveDraft = true) {
+    if (saveDraft) saveGuestDraft();
+    if (typeof window.openAuthModal === 'function') {
+        window.openAuthModal(mode);
+        return;
+    }
     const authOverlay = document.getElementById('authModalOverlay');
     if (authOverlay) {
         authOverlay.classList.add('auth-modal-show');
+        authOverlay.setAttribute('aria-hidden', 'false');
     } else {
         window.setTimeout(() => window.location.reload(), 0);
     }
+}
+
+function requireAuthentication(mode = 'login') {
+    if (window.IS_AUTHENTICATED) return true;
+    showAuthentication(mode);
+    return false;
+}
+
+function handleUnauthorized() {
+    window.IS_AUTHENTICATED = false;
+    showAuthentication('login');
+}
+
+function restoreGuestDraft() {
+    if (!window.IS_AUTHENTICATED) return false;
+    let draft;
+    try {
+        const storedDraft = sessionStorage.getItem(GUEST_DRAFT_KEY);
+        if (!storedDraft) return false;
+        sessionStorage.removeItem(GUEST_DRAFT_KEY);
+        draft = JSON.parse(storedDraft);
+    } catch (error) {
+        try {
+            sessionStorage.removeItem(GUEST_DRAFT_KEY);
+        } catch (_) {
+            // Storage may be unavailable; there is nothing else to restore.
+        }
+        console.warn('Unable to restore the guest draft:', error);
+        return false;
+    }
+
+    if (!draft || typeof draft !== 'object' || Array.isArray(draft)) return false;
+    const model = state.models.find(item => item.id === draft.model) || currentModel();
+    if (!model) return false;
+
+    state.selectedModel = model.id;
+    if (model.sizes.some(size => size.id === draft.image_size)) {
+        state.selectedResolution = draft.image_size;
+    }
+    if (model.ratios.includes(draft.aspect_ratio)) {
+        state.selectedAspectRatio = draft.aspect_ratio;
+    }
+    if (model.thinking_levels?.includes(draft.thinking_level)) {
+        state.selectedThinkingLevel = draft.thinking_level;
+    } else {
+        state.selectedThinkingLevel = model.default_thinking_level;
+    }
+    if (typeof draft.prompt === 'string') {
+        elements.promptInput.value = draft.prompt;
+    }
+    renderModelOptions();
+    refreshCapabilityOptions();
+    showEmptyState();
+    return true;
 }
 
 async function requestJson(url, options = {}, fallbackKey = 'request_failed') {
@@ -115,6 +194,7 @@ const elements = {
     resolutionGroup: document.getElementById('resolutionGroup'),
     resolutionSelect: document.getElementById('resolutionSelect'),
     aspectRatioSelect: document.getElementById('aspectRatioSelect'),
+    thinkingLevelSelect: document.getElementById('thinkingLevelSelect'),
     modelSelect: document.getElementById('modelSelect'),
     modelConfigStatus: document.getElementById('modelConfigStatus'),
     btnGenerate: document.getElementById('btnGenerate'),
@@ -157,7 +237,7 @@ async function deleteSession(sessionId) {
     return true;
 }
 
-async function generateImage(sessionId, prompt, aspectRatio, imageSize, referenceImages, model) {
+async function generateImage(sessionId, prompt, aspectRatio, imageSize, referenceImages, model, thinkingLevel) {
     try {
         const response = await apiFetch('/api/generate', {
             method: 'POST',
@@ -168,7 +248,8 @@ async function generateImage(sessionId, prompt, aspectRatio, imageSize, referenc
                 aspect_ratio: aspectRatio,
                 image_size: imageSize,
                 reference_images: referenceImages,  // 改为数组
-                model: model
+                model: model,
+                ...(thinkingLevel ? { thinking_level: thinkingLevel } : {})
             })
         });
 
@@ -252,6 +333,23 @@ function refreshCapabilityOptions() {
         model.sizes.map(size => ({ id: size.id, label: `${size.id} · 🪙 ${size.credits} ${I18n.t('credit_unit')}` })), state.selectedResolution);
     state.selectedAspectRatio = fillSelect(elements.aspectRatioSelect,
         model.ratios.map(ratio => ({ id: ratio, label: ratio })), state.selectedAspectRatio);
+    const thinkingLevels = Array.isArray(model.thinking_levels) ? model.thinking_levels : [];
+    if (thinkingLevels.length > 0) {
+        state.selectedThinkingLevel = fillSelect(
+            elements.thinkingLevelSelect,
+            thinkingLevels.map(level => ({
+                id: level,
+                label: I18n.t(level === 'high' ? 'thinking_high' : 'thinking_minimal')
+            })),
+            state.selectedThinkingLevel || model.default_thinking_level || 'minimal'
+        );
+        elements.thinkingLevelSelect.disabled = state.isSettingsLocked;
+    } else {
+        fillSelect(elements.thinkingLevelSelect, [
+            { id: 'automatic', label: I18n.t('thinking_automatic') }
+        ], 'automatic');
+        elements.thinkingLevelSelect.disabled = true;
+    }
     const hint = document.querySelector('[data-i18n="max_images_hint"]');
     if (hint) hint.textContent = I18n.t('max_images_count', model.max_references);
 }
@@ -505,6 +603,7 @@ async function selectSession(sessionId) {
 
 async function handleNewChat() {
     if (state.isGenerating || state.isLoadingSession) return null;
+    if (!requireAuthentication()) return null;
     try {
         const session = await createSession();
         state.sessions.unshift(session);
@@ -549,6 +648,7 @@ function readImageFile(file) {
 
 async function handleImageUpload(files) {
     if (state.isLoadingSession) return;
+    if (!requireAuthentication()) return;
     if (!files || files.length === 0) return;
 
     const fileArray = Array.from(files);
@@ -651,6 +751,7 @@ function clearReferenceImages() {
 
 async function handleGenerate() {
     if (state.isGenerating || state.isLoadingSession) return;
+    if (!requireAuthentication()) return;
 
     if (!state.modelConfigAvailable) {
         Modal.alert(I18n.t('generate_failed'), I18n.t('realtime_model_config_unavailable'), 'error');
@@ -685,6 +786,7 @@ async function handleGenerate() {
         // 保存用户当前选择的设置
         const currentResolution = state.selectedResolution;
         const currentAspectRatio = state.selectedAspectRatio;
+        const currentThinkingLevel = state.selectedThinkingLevel;
         const currentModel = state.selectedModel;
 
         const createdSession = await handleNewChat();
@@ -693,6 +795,7 @@ async function handleGenerate() {
         // 恢复用户的设置（handleNewChat会重置为默认值）
         state.selectedResolution = currentResolution;
         state.selectedAspectRatio = currentAspectRatio;
+        state.selectedThinkingLevel = currentThinkingLevel;
         state.selectedModel = currentModel;
 
         renderModelOptions();
@@ -708,7 +811,10 @@ async function handleGenerate() {
             state.selectedAspectRatio,
             state.selectedResolution,
             state.referenceImages,  // 改为数组
-            state.selectedModel
+            state.selectedModel,
+            currentModel()?.thinking_levels?.includes(state.selectedThinkingLevel)
+                ? state.selectedThinkingLevel
+                : null
         );
 
         // 更新会话标题
@@ -782,10 +888,13 @@ function setSettingsLocked(locked) {
     state.isSettingsLocked = locked;
     const method = locked ? 'add' : 'remove';
 
-    [elements.resolutionSelect, elements.aspectRatioSelect, elements.modelSelect].forEach(select => {
+    [elements.resolutionSelect, elements.aspectRatioSelect, elements.modelSelect, elements.thinkingLevelSelect].forEach(select => {
         select.disabled = locked;
         select.classList[method]('settings-locked');
     });
+    if (!currentModel()?.thinking_levels?.length) {
+        elements.thinkingLevelSelect.disabled = true;
+    }
 }
 
 function lockSettings() {
@@ -811,6 +920,7 @@ function applyLockedSettings(settings) {
     if (settings.model) {
         state.selectedModel = settings.model;
     }
+    state.selectedThinkingLevel = settings.thinking_level ?? null;
     renderModelOptions();
     refreshCapabilityOptions();
 }
@@ -821,6 +931,7 @@ function resetSettingsToDefault() {
 
     // 重置纵横比为默认的 1:1
     state.selectedAspectRatio = '1:1';
+    state.selectedThinkingLevel = 'minimal';
 
     // 重置模型为默认值
     const defaultModel = window.DEFAULT_MODEL || 'gemini-3.1-flash-image';
@@ -873,12 +984,14 @@ function bindEvents() {
 
     // 图片上传
     elements.uploadArea.addEventListener('click', () => {
+        if (!requireAuthentication()) return;
         elements.referenceImage.click();
     });
 
     elements.uploadArea.addEventListener('keydown', (e) => {
         if (e.key === 'Enter' || e.key === ' ') {
             e.preventDefault();
+            if (!requireAuthentication()) return;
             elements.referenceImage.click();
         }
     });
@@ -901,6 +1014,7 @@ function bindEvents() {
     elements.uploadArea.addEventListener('drop', (e) => {
         e.preventDefault();
         elements.uploadArea.classList.remove('drag-over');
+        if (!requireAuthentication()) return;
         handleImageUpload(e.dataTransfer.files);  // 传入整个files对象
     });
 
@@ -915,6 +1029,7 @@ function bindEvents() {
                 }
             }
             if (files.length > 0) {
+                if (!requireAuthentication()) return;
                 handleImageUpload(files);
             }
         }
@@ -933,6 +1048,10 @@ function bindEvents() {
     elements.aspectRatioSelect.addEventListener('change', () => {
         if (state.isSettingsLocked) return showSettingsLockedModal();
         state.selectedAspectRatio = elements.aspectRatioSelect.value;
+    });
+    elements.thinkingLevelSelect.addEventListener('change', () => {
+        if (state.isSettingsLocked) return showSettingsLockedModal();
+        state.selectedThinkingLevel = elements.thinkingLevelSelect.value;
     });
 
     // 模态框
@@ -990,10 +1109,11 @@ async function init() {
     bindEvents();
 
     if (window.IS_AUTHENTICATED) {
+        const restoredGuestDraft = restoreGuestDraft();
         await loadSessions();
 
         // 如果有会话，选择第一个
-        if (state.sessions.length > 0) {
+        if (!restoredGuestDraft && state.sessions.length > 0) {
             await selectSession(state.sessions[0].id);
         }
     }

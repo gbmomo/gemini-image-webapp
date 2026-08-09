@@ -4,6 +4,7 @@ import tempfile
 import unittest
 from contextlib import closing
 from datetime import datetime, timedelta
+from email.header import decode_header, make_header
 from unittest.mock import MagicMock, patch
 
 
@@ -474,6 +475,27 @@ class EmailServiceTests(unittest.TestCase):
             "database@example.com", "environment-password"
         )
         smtp_server.send_message.assert_called_once()
+
+        sent_message = smtp_server.send_message.call_args.args[0]
+        self.assertEqual("码言 Nano Banana 注册验证码", sent_message["Subject"])
+        decoded_from = str(make_header(decode_header(sent_message["From"])))
+        self.assertIn("码言 Nano Banana", decoded_from)
+        self.assertEqual("recipient@example.com", sent_message["To"])
+        self.assertTrue(sent_message.is_multipart())
+        alternatives = {
+            part.get_content_type(): part.get_payload(decode=True).decode(part.get_content_charset())
+            for part in sent_message.get_payload()
+        }
+        self.assertEqual({"text/plain", "text/html"}, set(alternatives))
+        for content in alternatives.values():
+            self.assertIn("123456", content)
+            self.assertIn("10 分钟", content)
+            self.assertIn("请勿向他人透露", content)
+            self.assertIn("如果这不是您的操作，请忽略此邮件", content)
+            self.assertIn("此邮件由系统自动发送，请勿回复", content)
+            self.assertNotIn("Nano Banana Pro", content)
+        self.assertNotIn("linear-gradient", alternatives["text/html"])
+        self.assertNotIn("box-shadow", alternatives["text/html"])
 
 
 if __name__ == "__main__":

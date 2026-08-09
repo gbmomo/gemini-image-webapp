@@ -201,21 +201,30 @@ MAINTENANCE_LOCK_FILE = os.path.join(DATA_DIR, ".maintenance.lock")
 COMMON_RATIOS = ["1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9"]
 MODEL_CAPABILITIES = {
     "gemini-3.1-flash-lite-image": {
-        "name": "Nano Banana 2 Lite", "sizes": ["1K"], "ratios": COMMON_RATIOS, "max_references": 14,
+        "name": "Nano Banana 2 Lite", "sizes": ["1K"], "ratios": COMMON_RATIOS,
+        "max_references": 14, "thinking_levels": ["minimal", "high"],
+        "default_thinking_level": "minimal",
     },
     "gemini-3.1-flash-image": {
         "name": "Nano Banana 2", "sizes": ["512", "1K", "2K", "4K"],
         "ratios": ["1:1", "1:4", "1:8", "2:3", "3:2", "3:4", "4:1", "4:3", "4:5", "5:4", "8:1", "9:16", "16:9", "21:9"],
-        "max_references": 14,
+        "max_references": 14, "thinking_levels": ["minimal", "high"],
+        "default_thinking_level": "minimal",
     },
     "gemini-3-pro-image": {
-        "name": "Nano Banana Pro", "sizes": ["1K", "2K", "4K"], "ratios": COMMON_RATIOS, "max_references": 14,
+        "name": "Nano Banana Pro", "sizes": ["1K", "2K", "4K"], "ratios": COMMON_RATIOS,
+        "max_references": 14, "thinking_levels": [], "default_thinking_level": None,
     },
     "gemini-2.5-flash-image": {
-        "name": "Nano Banana", "sizes": ["1K"], "ratios": COMMON_RATIOS, "max_references": 3,
+        "name": "Nano Banana", "sizes": ["1K"], "ratios": COMMON_RATIOS,
+        "max_references": 3, "thinking_levels": [], "default_thinking_level": None,
     },
 }
 ALLOWED_MODELS = {model_id: config["name"] for model_id, config in MODEL_CAPABILITIES.items()}
+THINKING_LEVEL_ENUMS = {
+    "minimal": types.ThinkingLevel.MINIMAL,
+    "high": types.ThinkingLevel.HIGH,
+}
 DEFAULT_PRICES = {"512": 1, "1K": 1, "2K": 2, "4K": 4}
 MAX_PROMPT_LENGTH = 100000  # 支持长提示词
 MAX_REFERENCE_IMAGES = 14
@@ -747,6 +756,29 @@ def rebuild_chat_history(user_id, session_id):
     return history
 
 
+def _resolve_thinking_level(model, thinking_level=None):
+    """Return the effective thinking level and reject unsupported combinations."""
+    capabilities = MODEL_CAPABILITIES.get(model)
+    if capabilities is None:
+        raise ValueError("Unsupported model")
+    if thinking_level is None:
+        return capabilities["default_thinking_level"]
+    if thinking_level not in capabilities["thinking_levels"]:
+        raise ValueError(f"{capabilities['name']} does not support this thinking level")
+    return thinking_level
+
+
+def _normalize_session_settings(settings):
+    """Add defaults introduced after a session was created without mutating it."""
+    if not isinstance(settings, dict):
+        return settings
+    normalized = dict(settings)
+    model = normalized.get("model")
+    if "thinking_level" not in normalized and model in MODEL_CAPABILITIES:
+        normalized["thinking_level"] = MODEL_CAPABILITIES[model]["default_thinking_level"]
+    return normalized
+
+
 def create_chat(
     session_id,
     aspect_ratio="auto",
@@ -754,17 +786,25 @@ def create_chat(
     model=None,
     user_id=None,
     history_version=None,
+    thinking_level=None,
 ):
     """创建新的聊天实例，如果有历史消息则自动恢复上下文"""
     model = model or get_default_model()
+    thinking_level = _resolve_thinking_level(model, thinking_level)
     # 本项目使用 Generate Content 的 chats API；response_format 仅属于
     # Interactions API，不能传给 GenerateContentConfig。
     image_config = types.ImageConfig(image_size=image_size)
     if aspect_ratio != "auto":
         image_config.aspect_ratio = aspect_ratio
+    thinking_config = None
+    if thinking_level is not None:
+        thinking_config = types.ThinkingConfig(
+            thinking_level=THINKING_LEVEL_ENUMS[thinking_level]
+        )
     config = types.GenerateContentConfig(
         response_modalities=['TEXT', 'IMAGE'],
         image_config=image_config,
+        thinking_config=thinking_config,
     )
     
     # 从保存的消息历史重建 Chat 上下文
@@ -785,6 +825,7 @@ def create_chat(
             "aspect_ratio": aspect_ratio,
             "image_size": image_size,
             "model": model,
+            "thinking_level": thinking_level,
             "history_version": history_version,
             "last_access": time.time()
         }
@@ -798,9 +839,11 @@ def get_or_create_chat(
     model=None,
     user_id=None,
     history_version=None,
+    thinking_level=None,
 ):
     """获取或创建聊天实例"""
     model = model or get_default_model()
+    thinking_level = _resolve_thinking_level(model, thinking_level)
     with active_chats_lock:
         if session_id in active_chats:
             chat_data = active_chats[session_id]
@@ -809,17 +852,19 @@ def get_or_create_chat(
             if (chat_data["aspect_ratio"] != aspect_ratio or 
                 chat_data["image_size"] != image_size or 
                 chat_data.get("model") != model or
+                chat_data.get("thinking_level") != thinking_level or
                 chat_data.get("history_version") != history_version):
                 pass  # 需要重建，退出锁后处理
             else:
                 return chat_data["chat"]
     return create_chat(
-        session_id,
-        aspect_ratio,
-        image_size,
-        model,
-        user_id,
-        history_version,
+        session_id=session_id,
+        aspect_ratio=aspect_ratio,
+        image_size=image_size,
+        model=model,
+        user_id=user_id,
+        history_version=history_version,
+        thinking_level=thinking_level,
     )
 
 
@@ -847,6 +892,8 @@ def get_models():
                   for size in config["sizes"]],
         "ratios": config["ratios"],
         "max_references": config["max_references"],
+        "thinking_levels": config["thinking_levels"],
+        "default_thinking_level": config["default_thinking_level"],
     } for model_id, config in MODEL_CAPABILITIES.items()]
     return jsonify({"models": models, "default": default_model})
 
@@ -1045,7 +1092,7 @@ def get_session_route(session_id):
         "created_at": session_data.get("created_at"),
         "updated_at": session_data.get("updated_at"),
         "messages": filtered_messages,
-        "settings": session_data.get("settings"),
+        "settings": _normalize_session_settings(session_data.get("settings")),
     })
 
 
@@ -1106,6 +1153,8 @@ def _validate_generate_params(data):
     image_size = data.get("image_size", "2K")
     model = data.get("model") or get_default_model()
     reference_images = data.get("reference_images", [])
+    thinking_level_supplied = "thinking_level" in data
+    thinking_level = data.get("thinking_level")
 
     if not isinstance(session_id, str) or not session_id or not isinstance(prompt, str) or not prompt:
         return jsonify({"error": "缺少必要参数"}), 400
@@ -1115,6 +1164,8 @@ def _validate_generate_params(data):
         return jsonify({"error": "无效的纵横比参数"}), 400
     if not isinstance(image_size, str):
         return jsonify({"error": "无效的分辨率参数"}), 400
+    if thinking_level_supplied and not isinstance(thinking_level, str):
+        return jsonify({"error": "无效的思考强度参数"}), 400
     if not isinstance(reference_images, list) or any(not isinstance(image, str) for image in reference_images):
         return jsonify({"error": "参考图片参数格式无效"}), 400
     capabilities = MODEL_CAPABILITIES[model]
@@ -1123,6 +1174,8 @@ def _validate_generate_params(data):
         return jsonify({"error": f"{capabilities['name']} 不支持该纵横比"}), 400
     if image_size not in capabilities["sizes"]:
         return jsonify({"error": f"{capabilities['name']} 不支持 {image_size} 分辨率"}), 400
+    if thinking_level_supplied and thinking_level not in capabilities["thinking_levels"]:
+        return jsonify({"error": f"{capabilities['name']} 不支持该思考强度"}), 400
     if len(prompt.strip()) == 0:
         return jsonify({"error": "提示词不能为空"}), 400
     if len(prompt) > MAX_PROMPT_LENGTH:
@@ -1415,15 +1468,27 @@ def generate_image():
         aspect_ratio = data.get("aspect_ratio", "auto")
         image_size = data.get("image_size", "2K")
         model = data.get("model") or get_default_model()
+        requested_thinking_level = data.get("thinking_level")
+        thinking_level = _resolve_thinking_level(model, requested_thinking_level)
         if session_data.get("settings"):
-            settings = session_data["settings"]
+            settings = _normalize_session_settings(session_data["settings"])
             aspect_ratio = settings.get("aspect_ratio", aspect_ratio)
             image_size = settings.get("image_size", image_size)
             model = settings.get("model", model)
+            thinking_level = settings.get("thinking_level")
+            if ("thinking_level" in data
+                    and requested_thinking_level != thinking_level):
+                return jsonify({
+                    "error": "思考强度已随当前会话锁定，如需更改请新建对话"
+                }), 400
         if (model not in MODEL_CAPABILITIES
                 or image_size not in MODEL_CAPABILITIES[model]["sizes"]
-                or (aspect_ratio != "auto" and aspect_ratio not in MODEL_CAPABILITIES[model]["ratios"])):
+                or (aspect_ratio != "auto" and aspect_ratio not in MODEL_CAPABILITIES[model]["ratios"])
+                or (thinking_level is not None
+                    and thinking_level not in MODEL_CAPABILITIES[model]["thinking_levels"])):
             return jsonify({"error": "该历史会话的模型设置已不再受支持，请新建对话"}), 400
+        if thinking_level is None and MODEL_CAPABILITIES[model]["thinking_levels"]:
+            thinking_level = MODEL_CAPABILITIES[model]["default_thinking_level"]
         if len(reference_images) > MODEL_CAPABILITIES[model]["max_references"]:
             return jsonify({"error": f"{MODEL_CAPABILITIES[model]['name']} 最多支持 {MODEL_CAPABILITIES[model]['max_references']} 张参考图"}), 400
 
@@ -1458,12 +1523,13 @@ def generate_image():
 
         try:
             chat = get_or_create_chat(
-                session_id,
-                aspect_ratio,
-                image_size,
-                model,
-                user_id,
-                expected_history_version,
+                session_id=session_id,
+                aspect_ratio=aspect_ratio,
+                image_size=image_size,
+                model=model,
+                user_id=user_id,
+                history_version=expected_history_version,
+                thinking_level=thinking_level,
             )
             response = chat.send_message(contents)
 
@@ -1502,12 +1568,17 @@ def generate_image():
                             "aspect_ratio": aspect_ratio,
                             "image_size": image_size,
                             "model": model,
+                            "thinking_level": thinking_level,
                         }
+                    else:
+                        current_session["settings"] = _normalize_session_settings(
+                            current_session.get("settings")
+                        )
                     current_session["updated_at"] = now
                     _save_sessions_unlocked(user_id, current_sessions)
                     persisted_to_session = True
                     session_title = current_session["title"]
-                    session_settings = current_session.get("settings")
+                    session_settings = _normalize_session_settings(current_session.get("settings"))
                     new_history_version = _history_version(current_session)
 
             with active_chats_lock:

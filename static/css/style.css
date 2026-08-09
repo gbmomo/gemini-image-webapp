@@ -341,6 +341,42 @@ body.admin-page {
     background: rgba(239, 68, 68, 0.3);
 }
 
+.guest-auth-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.btn-auth-entry {
+    padding: 5px 12px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border-color);
+    color: var(--text-primary);
+    font: inherit;
+    font-size: 0.9rem;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: all var(--transition-fast);
+}
+
+.btn-auth-entry-secondary {
+    background: var(--bg-tertiary);
+}
+
+.btn-auth-entry-secondary:hover {
+    background: var(--bg-hover);
+}
+
+.btn-auth-entry-primary {
+    background: var(--accent-gradient);
+    border-color: transparent;
+}
+
+.btn-auth-entry-primary:hover {
+    filter: brightness(1.08);
+}
+
 /* 语言切换按钮 */
 .lang-switch {
     display: flex;
@@ -446,6 +482,7 @@ body.admin-page {
     [lang="en"] .btn-recharge,
     [lang="en"] .btn-admin,
     [lang="en"] .btn-user-logout,
+    [lang="en"] .btn-auth-entry,
     [lang="en"] .user-name {
         font-size: 0.85rem;
         padding: 4px 8px;
@@ -1761,6 +1798,11 @@ body.admin-page {
         white-space: nowrap;
     }
 
+    .btn-auth-entry {
+        font-size: 0.75rem;
+        padding: 4px 8px;
+    }
+
     /* 汉堡菜单按钮定位 */
     .hamburger-btn {
         grid-column: 1;
@@ -2798,6 +2840,7 @@ body.admin-page {
 }
 
 .auth-modal-content {
+    position: relative;
     background: var(--glass-bg);
     backdrop-filter: var(--glass-blur);
     -webkit-backdrop-filter: var(--glass-blur);
@@ -2815,6 +2858,37 @@ body.admin-page {
     overflow-y: auto;
     overflow-x: hidden;
     /* 内容过多时内部滚动，禁止水平滚动 */
+}
+
+.auth-close-btn {
+    position: absolute;
+    top: 14px;
+    left: 14px;
+    z-index: 10;
+    width: 32px;
+    height: 32px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: var(--bg-tertiary);
+    color: var(--text-muted);
+    font: inherit;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+}
+
+.auth-close-btn:hover,
+.auth-close-btn:focus-visible {
+    color: var(--text-primary);
+    background: var(--bg-hover);
+}
+
+@media (max-width: 479px) {
+    .guest-auth-actions {
+        gap: 3px;
+    }
 }
 
 @keyframes slideUp {

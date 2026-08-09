@@ -34,6 +34,7 @@
 ## Current Features
 
 - Text-to-image, reference-image generation, and contextual multi-turn image iteration. References can be added with the file picker, drag and drop, or paste.
+- Visitors may browse the full home page, enter a prompt, and choose generation settings without signing in. Creating a conversation, adding references, or generating requires authentication; the guest draft is restored after login without automatically generating or charging credits.
 - Each user can create, switch, and delete conversations. The first successful prompt supplies the first 20 characters of the automatic title and locks the model, resolution, and ratio; changing them requires a new conversation. A title-update API exists, but the current UI has no rename control.
 - Chinese and English switching. Set the default with `DEFAULT_LANG` in `static/js/i18n.js`.
 - Email-code registration, username/password login, logout, and signed-cookie login sessions.
@@ -48,14 +49,14 @@ Registration requires a unique username of 3 to 64 characters, a unique email no
 
 ## Model Capabilities
 
-The backend validates each model's resolutions, aspect ratios, and reference-image count. These are not merely UI restrictions.
+The backend validates each model's thinking levels, resolutions, aspect ratios, and reference-image count. These are not merely UI restrictions. Thinking level is locked with the other generation settings after the first successful image.
 
-| Model ID | Display name | Resolutions | Max references | Aspect ratios |
-|---|---|---:|---:|---|
-| `gemini-3.1-flash-lite-image` | Nano Banana 2 Lite | 1K | 14 | Common ratios |
-| `gemini-3.1-flash-image` | Nano Banana 2 | 512, 1K, 2K, 4K | 14 | Common ratios plus 1:4, 1:8, 4:1, and 8:1 |
-| `gemini-3-pro-image` | Nano Banana Pro | 1K, 2K, 4K | 14 | Common ratios |
-| `gemini-2.5-flash-image` | Nano Banana | 1K | 3 | Common ratios |
+| Model ID | Display name | Resolutions | Thinking levels | Max references | Aspect ratios |
+|---|---|---:|---|---:|---|
+| `gemini-3.1-flash-lite-image` | Nano Banana 2 Lite | 1K | `minimal`, `high` | 14 | Common ratios |
+| `gemini-3.1-flash-image` | Nano Banana 2 | 512, 1K, 2K, 4K | `minimal`, `high` | 14 | Common ratios plus 1:4, 1:8, 4:1, and 8:1 |
+| `gemini-3-pro-image` | Nano Banana Pro | 1K, 2K, 4K | Automatic, not adjustable | 14 | Common ratios |
+| `gemini-2.5-flash-image` | Nano Banana | 1K | Not adjustable | 3 | Common ratios |
 
 Common ratios are `1:1`, `2:3`, `3:2`, `3:4`, `4:3`, `4:5`, `5:4`, `9:16`, `16:9`, and `21:9`.
 
@@ -352,7 +353,7 @@ Every `POST`, `PUT`, and `DELETE` request requires a valid CSRF token. The web U
 | GET / POST | `/api/admin/api-settings` | Administrator | Read or save API/SMTP settings |
 | GET / PUT | `/api/admin/model-pricing` | Administrator | Read or save model pricing |
 
-The main JSON write fields are: `username` and `password` for login; `email` for sending a code; `username`, `email`, `password`, and `verification_code` for registration; `title` for renaming; `session_id`, `prompt`, `model`, `image_size`, `aspect_ratio`, and `reference_images` for generation; `code` for redemption; `amount` for admin credit changes; `cutoff_date` for cleanup; `credits` and `count` for code generation; `provider`, `api_key`, `custom_base_url`, `default_model`, `email_sender`, `email_password`, `smtp_server`, and `smtp_port` for API/SMTP settings; and a `prices` array of `model_id`, `image_size`, and `credits` objects for model pricing.
+The main JSON write fields are: `username` and `password` for login; `email` for sending a code; `username`, `email`, `password`, and `verification_code` for registration; `title` for renaming; `session_id`, `prompt`, `model`, `thinking_level`, `image_size`, `aspect_ratio`, and `reference_images` for generation; `code` for redemption; `amount` for admin credit changes; `cutoff_date` for cleanup; `credits` and `count` for code generation; `provider`, `api_key`, `custom_base_url`, `default_model`, `email_sender`, `email_password`, `smtp_server`, and `smtp_port` for API/SMTP settings; and a `prices` array of `model_id`, `image_size`, and `credits` objects for model pricing.
 
 ## Project Layout
 

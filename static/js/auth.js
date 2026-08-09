@@ -2,6 +2,84 @@
 // 认证相关逻辑（从 index.html 提取）
 // ========================================
 
+const authModalOverlay = document.getElementById('authModalOverlay');
+const closeAuthModalButton = document.getElementById('closeAuthModal');
+const btnGuestLogin = document.getElementById('btnGuestLogin');
+const btnGuestRegister = document.getElementById('btnGuestRegister');
+let authModalReturnFocus = null;
+let authModalPreviousOverflow = '';
+
+function getAuthFocusableElements() {
+    if (!authModalOverlay) return [];
+    return Array.from(authModalOverlay.querySelectorAll(
+        'a[href], button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])'
+    )).filter(element => element.offsetParent !== null && !element.hidden);
+}
+
+function openAuthModal(mode = 'login') {
+    if (!authModalOverlay || window.IS_AUTHENTICATED) return;
+    if (typeof window.saveGuestDraft === 'function') window.saveGuestDraft();
+    switchAuthMode(mode);
+    if (!authModalOverlay.classList.contains('auth-modal-show')) {
+        authModalReturnFocus = document.activeElement;
+        authModalPreviousOverflow = document.body.style.overflow;
+    }
+    authModalOverlay.classList.add('auth-modal-show');
+    authModalOverlay.setAttribute('aria-hidden', 'false');
+    document.body.style.overflow = 'hidden';
+    window.setTimeout(() => {
+        const target = mode === 'register'
+            ? document.getElementById('regUsername')
+            : document.getElementById('loginUsername');
+        (target || getAuthFocusableElements()[0])?.focus();
+    }, 50);
+}
+
+function closeAuthModal() {
+    if (!authModalOverlay?.classList.contains('auth-modal-show')) return;
+    authModalOverlay.classList.remove('auth-modal-show');
+    authModalOverlay.setAttribute('aria-hidden', 'true');
+    document.body.style.overflow = authModalPreviousOverflow;
+    const returnFocus = authModalReturnFocus;
+    authModalReturnFocus = null;
+    if (returnFocus?.isConnected) returnFocus.focus();
+}
+
+window.openAuthModal = openAuthModal;
+window.closeAuthModal = closeAuthModal;
+
+btnGuestLogin?.addEventListener('click', () => openAuthModal('login'));
+btnGuestRegister?.addEventListener('click', () => openAuthModal('register'));
+closeAuthModalButton?.addEventListener('click', closeAuthModal);
+
+authModalOverlay?.addEventListener('click', event => {
+    if (event.target === authModalOverlay) closeAuthModal();
+});
+
+authModalOverlay?.addEventListener('keydown', event => {
+    if (event.key === 'Escape') {
+        event.preventDefault();
+        closeAuthModal();
+        return;
+    }
+    if (event.key !== 'Tab') return;
+    const focusable = getAuthFocusableElements();
+    if (focusable.length === 0) {
+        event.preventDefault();
+        authModalOverlay.focus();
+        return;
+    }
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+    }
+});
+
 function setTranslatedStatus(element, key, fallbackKey = '') {
     element.dataset.i18nStatusKey = key || '';
     element.dataset.i18nStatusFallback = fallbackKey;
@@ -27,6 +105,15 @@ function switchAuthMode(mode) {
     } else {
         loginSection.style.display = 'block';
         registerSection.style.display = 'none';
+    }
+
+    if (authModalOverlay?.classList.contains('auth-modal-show')) {
+        window.setTimeout(() => {
+            const target = mode === 'register'
+                ? document.getElementById('regUsername')
+                : document.getElementById('loginUsername');
+            target?.focus();
+        }, 0);
     }
 }
 

@@ -41,7 +41,9 @@ const translations = {
         close_image_preview: '关闭图片预览',
         close_recharge: '关闭充值窗口',
         auth_dialog: '用户登录或注册',
+        close_auth: '关闭登录窗口',
         model_select: 'AI 模型',
+        thinking_level_select: '思考强度',
         resolution_select: '分辨率',
         aspect_ratio_select: '纵横比',
         upload_reference: '上传参考图片',
@@ -57,10 +59,14 @@ const translations = {
         upload_desc: '可选：上传参考图进行图生图。支持拖拽或粘贴截图，最多14张',
         prompt_label: '提示词',
         prompt_placeholder: '例如：一只可爱的小猫咪坐在花园里，油画风格，高清，细节丰富',
-        aspect_resolution: '模型 & 纵横比 & 分辨率',
+        aspect_resolution: '模型 & 思考强度 & 纵横比 & 分辨率',
         resolution_label: '分辨率(不同分辨率消耗点数数目不同)',
         aspect_ratio_label: '纵横比',
         model_label: 'AI 模型',
+        thinking_level_label: '思考强度',
+        thinking_minimal: '快速（速度优先）',
+        thinking_high: '精细（质量优先）',
+        thinking_automatic: '由当前模型自动处理，无法调整',
         model_nano_banana_pro: 'Nano Banana Pro',
         model_nano_banana_pro_desc: '专业创作',
         model_nano_banana_2: 'Nano Banana 2',
@@ -74,7 +80,7 @@ const translations = {
         aspect_21_9: '21:9 超宽',
         aspect_3_2: '3:2 横版',
         aspect_2_3: '2:3 竖版',
-        settings_warning: '⚠️ 更改模型、分辨率或纵横比会重置对话记忆，AI 将无法记住之前生成的图片',
+        settings_warning: '⚠️ 更改模型、思考强度、分辨率或纵横比会重置对话记忆，AI 将无法记住之前生成的图片',
         generate_btn: '生成图片',
 
         // 预览区
@@ -104,6 +110,8 @@ const translations = {
 
         // 登录/注册
         welcome_back: '欢迎回来',
+        login_entry: '登录',
+        register_entry: '注册',
         login_subtitle: '登录码言 Nano Banana 创作',
         username: '用户名',
         username_placeholder: '请输入用户名',
@@ -192,7 +200,7 @@ const translations = {
         generated_image: '生成的图片',
         reference_image: '参考图',
         settings_locked: '设置已锁定',
-        settings_locked_msg: '更改模型、分辨率或纵横比会重置对话记忆，AI 将无法记住之前生成的图片。<br><br>如需使用不同设置，请点击确定创建新对话。',
+        settings_locked_msg: '更改模型、思考强度、分辨率或纵横比会重置对话记忆，AI 将无法记住之前生成的图片。<br><br>如需使用不同设置，请点击确定创建新对话。',
 
         // 管理后台
         admin_page_title: '管理员控制台 - 码言旗下 Nano Banana',
@@ -367,7 +375,9 @@ const translations = {
         close_image_preview: 'Close image preview',
         close_recharge: 'Close recharge window',
         auth_dialog: 'Login or registration',
+        close_auth: 'Close login window',
         model_select: 'AI Model',
+        thinking_level_select: 'Thinking level',
         resolution_select: 'Resolution',
         aspect_ratio_select: 'Aspect Ratio',
         upload_reference: 'Upload reference images',
@@ -383,10 +393,14 @@ const translations = {
         upload_desc: 'Optional: Upload reference images. Support drag & drop or paste, max 14 images',
         prompt_label: 'Prompt',
         prompt_placeholder: 'e.g., A cute kitten sitting in a garden, oil painting style, HD, rich details',
-        aspect_resolution: 'Model & Aspect Ratio & Resolution',
+        aspect_resolution: 'Model, Thinking Level, Aspect Ratio & Resolution',
         resolution_label: 'Resolution (different resolutions cost different credits)',
         aspect_ratio_label: 'Aspect Ratio',
         model_label: 'AI Model',
+        thinking_level_label: 'Thinking Level',
+        thinking_minimal: 'Fast (speed first)',
+        thinking_high: 'Refined (quality first)',
+        thinking_automatic: 'Handled automatically by this model',
         model_nano_banana_pro: 'Nano Banana Pro',
         model_nano_banana_pro_desc: 'Professional',
         model_nano_banana_2: 'Nano Banana 2',
@@ -400,7 +414,7 @@ const translations = {
         aspect_21_9: '21:9 Ultra-wide',
         aspect_3_2: '3:2 Landscape',
         aspect_2_3: '2:3 Portrait',
-        settings_warning: '⚠️ Changing model, resolution or aspect ratio will reset chat memory, AI will not remember previously generated images',
+        settings_warning: '⚠️ Changing model, thinking level, resolution or aspect ratio will reset chat memory, AI will not remember previously generated images',
         generate_btn: 'Generate Image',
 
         // Preview area
@@ -430,6 +444,8 @@ const translations = {
 
         // Login/Register
         welcome_back: 'Welcome Back',
+        login_entry: 'Login',
+        register_entry: 'Register',
         login_subtitle: 'Login to GitSay Nano Banana',
         username: 'Username',
         username_placeholder: 'Enter username',
@@ -518,7 +534,7 @@ const translations = {
         generated_image: 'Generated image',
         reference_image: 'Reference image',
         settings_locked: 'Settings Locked',
-        settings_locked_msg: 'Changing model, resolution or aspect ratio will reset chat memory, AI will not remember previously generated images.<br><br>Click OK to create a new chat with different settings.',
+        settings_locked_msg: 'Changing model, thinking level, resolution or aspect ratio will reset chat memory, AI will not remember previously generated images.<br><br>Click OK to create a new chat with different settings.',
 
         // Admin panel
         admin_page_title: 'Admin Console - GitSay Nano Banana',

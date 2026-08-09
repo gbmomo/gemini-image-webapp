@@ -274,6 +274,98 @@ class AppRegressionTests(unittest.TestCase):
         self.assertEqual(400, response.status_code)
         self.assertEqual(4, database.get_user_by_id(self.user_id)["credits"])
 
+    def test_invalid_thinking_level_is_rejected_before_charging(self):
+        session_id = self._create_session(self.user_id)
+        client = self._client_for(self.user_id)
+        response = client.post(
+            "/api/generate",
+            json=self._generate_payload(
+                session_id,
+                model="gemini-3-pro-image",
+                thinking_level="high",
+            ),
+        )
+
+        self.assertEqual(400, response.status_code)
+        self.assertEqual(4, database.get_user_by_id(self.user_id)["credits"])
+
+    def test_legacy_session_detail_returns_normalized_thinking_level(self):
+        session_id = self._create_session(self.user_id)
+        sessions = app_module.load_sessions(self.user_id)
+        sessions[session_id]["settings"] = {
+            "aspect_ratio": "1:1",
+            "image_size": "1K",
+            "model": "gemini-3.1-flash-image",
+        }
+        app_module.save_sessions(self.user_id, sessions)
+
+        response = self._client_for(self.user_id).get(f"/api/sessions/{session_id}")
+
+        self.assertEqual(200, response.status_code)
+        self.assertEqual("minimal", response.get_json()["settings"]["thinking_level"])
+
+    def test_locked_thinking_level_change_is_rejected_before_charging(self):
+        session_id = self._create_session(self.user_id)
+        sessions = app_module.load_sessions(self.user_id)
+        sessions[session_id]["settings"] = {
+            "aspect_ratio": "1:1",
+            "image_size": "1K",
+            "model": "gemini-3.1-flash-image",
+            "thinking_level": "high",
+        }
+        app_module.save_sessions(self.user_id, sessions)
+        client = self._client_for(self.user_id)
+
+        with patch.object(app_module, "ensure_client_current", return_value=True), patch.object(
+            app_module, "get_or_create_chat"
+        ) as get_chat:
+            response = client.post(
+                "/api/generate",
+                json=self._generate_payload(
+                    session_id,
+                    model="gemini-3.1-flash-image",
+                    thinking_level="minimal",
+                ),
+            )
+
+        self.assertEqual(400, response.status_code)
+        self.assertIn("新建", response.get_json()["error"])
+        self.assertEqual(4, database.get_user_by_id(self.user_id)["credits"])
+        get_chat.assert_not_called()
+
+    def test_successful_generation_persists_thinking_level(self):
+        session_id = self._create_session(self.user_id)
+        response_part = SimpleNamespace(
+            text=None,
+            inline_data=object(),
+            thought_signature=None,
+            as_image=lambda: Image.new("RGB", (2, 2), "green"),
+        )
+        fake_chat = SimpleNamespace(
+            send_message=lambda contents: SimpleNamespace(parts=[response_part])
+        )
+        client = self._client_for(self.user_id)
+
+        with patch.object(app_module, "ensure_client_current", return_value=True), patch.object(
+            app_module, "get_or_create_chat", return_value=fake_chat
+        ) as get_chat:
+            response = client.post(
+                "/api/generate",
+                json=self._generate_payload(
+                    session_id,
+                    model="gemini-3.1-flash-image",
+                    thinking_level="high",
+                ),
+            )
+
+        self.assertEqual(200, response.status_code)
+        self.assertEqual("high", response.get_json()["settings"]["thinking_level"])
+        self.assertEqual(
+            "high",
+            app_module.load_sessions(self.user_id)[session_id]["settings"]["thinking_level"],
+        )
+        self.assertEqual("high", get_chat.call_args.kwargs["thinking_level"])
+
     def test_reference_image_parser_is_restricted_to_allowlisted_formats(self):
         reference_buffer = io.BytesIO()
         Image.new("RGB", (2, 2), "white").save(reference_buffer, format="JPEG")
@@ -432,6 +524,26 @@ class AppRegressionTests(unittest.TestCase):
         )
         self.assertEqual(200, login.status_code)
         self.assertTrue(login.get_json()["success"])
+
+    def test_anonymous_home_shows_full_page_without_opening_auth_dialog(self):
+        client = app_module.app.test_client()
+
+        page = client.get("/")
+        models = client.get("/api/models")
+        protected_sessions = client.get("/api/sessions")
+
+        self.assertEqual(200, page.status_code)
+        html = page.get_data(as_text=True)
+        self.assertIn('id="promptInput"', html)
+        self.assertIn('id="modelSelect"', html)
+        self.assertIn('id="thinkingLevelSelect"', html)
+        self.assertIn('id="btnGuestLogin"', html)
+        self.assertIn('id="btnGuestRegister"', html)
+        auth_tag = re.search(r'<div class="auth-modal-overlay[^>]*id="authModalOverlay"', html)
+        self.assertIsNotNone(auth_tag)
+        self.assertNotIn("auth-modal-show", auth_tag.group(0))
+        self.assertEqual(200, models.status_code)
+        self.assertEqual(401, protected_sessions.status_code)
 
 
 if __name__ == "__main__":

@@ -67,127 +67,39 @@ def send_verification_email(recipient_email, verification_code):
         message = MIMEMultipart('alternative')
         message['From'] = formataddr((str(Header("码言 Nano Banana", 'utf-8')), email_sender))
         message['To'] = recipient_email
-        message['Subject'] = "码言 Nano Banana - 注册验证码"
+        message['Subject'] = "码言 Nano Banana 注册验证码"
         
         # HTML 邮件内容
-        html_content = f"""
-        <!DOCTYPE html>
-        <html lang="zh-CN">
-        <head>
-            <meta charset="UTF-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <style>
-                body {{
-                    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-                    background-color: #f4f4f4;
-                    margin: 0;
-                    padding: 0;
-                }}
-                .container {{
-                    max-width: 600px;
-                    margin: 40px auto;
-                    background-color: #ffffff;
-                    border-radius: 12px;
-                    overflow: hidden;
-                    box-shadow: 0 4px 20px rgba(0,0,0,0.1);
-                }}
-                .header {{
-                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                    color: white;
-                    padding: 30px;
-                    text-align: center;
-                }}
-                .header h1 {{
-                    margin: 0;
-                    font-size: 24px;
-                    font-weight: 600;
-                }}
-                .content {{
-                    padding: 40px 30px;
-                }}
-                .code-box {{
-                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                    color: white;
-                    font-size: 32px;
-                    font-weight: bold;
-                    text-align: center;
-                    padding: 20px;
-                    margin: 30px 0;
-                    border-radius: 8px;
-                    letter-spacing: 8px;
-                    font-family: 'Courier New', monospace;
-                }}
-                .info {{
-                    color: #666;
-                    line-height: 1.6;
-                    margin: 20px 0;
-                }}
-                .warning {{
-                    background-color: #fff3cd;
-                    border-left: 4px solid #ffc107;
-                    padding: 12px;
-                    margin: 20px 0;
-                    color: #856404;
-                    border-radius: 4px;
-                }}
-                .footer {{
-                    background-color: #f8f9fa;
-                    padding: 20px;
-                    text-align: center;
-                    color: #6c757d;
-                    font-size: 14px;
-                }}
-                .brand {{
-                    font-weight: 600;
-                    color: #667eea;
-                }}
-            </style>
-        </head>
-        <body>
-            <div class="container">
-                <div class="header">
-                    <h1>🍌 码言 Nano Banana Pro</h1>
-                </div>
-                <div class="content">
-                    <p class="info">您好！</p>
-                    <p class="info">感谢您注册 <span class="brand">码言 Nano Banana Pro</span>。请使用以下验证码完成注册：</p>
-                    
-                    <div class="code-box">
-                        {verification_code}
-                    </div>
-                    
-                    <div class="warning">
-                        ⚠️ 验证码将在 <strong>10 分钟</strong>后失效，请尽快完成注册。
-                    </div>
-                    
-                    <p class="info">如果这不是您的操作，请忽略此邮件。</p>
-                </div>
-                <div class="footer">
-                    <p>此邮件由系统自动发送，请勿回复。</p>
-                    <p>© 2026 码言 Nano Banana Pro. All rights reserved.</p>
-                </div>
-            </div>
-        </body>
-        </html>
-        """
+        html_content = f"""<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body style="margin:0;padding:24px;background:#ffffff;color:#24292f;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;">
+    <div style="max-width:520px;margin:0 auto;border:1px solid #d0d7de;border-radius:6px;padding:28px;">
+        <h1 style="margin:0 0 24px;font-size:20px;font-weight:600;">码言 Nano Banana</h1>
+        <p style="margin:0 0 16px;line-height:1.6;">请使用以下验证码完成注册：</p>
+        <div style="margin:20px 0;padding:16px;background:#f6f8fa;border:1px solid #d0d7de;border-radius:6px;text-align:center;font-family:Consolas,'Courier New',monospace;font-size:30px;font-weight:600;letter-spacing:6px;">{verification_code}</div>
+        <p style="margin:0 0 12px;line-height:1.6;">验证码将在 10 分钟后失效，请勿向他人透露。</p>
+        <p style="margin:0 0 24px;line-height:1.6;">如果这不是您的操作，请忽略此邮件。</p>
+        <p style="margin:0;padding-top:16px;border-top:1px solid #d8dee4;color:#57606a;font-size:13px;line-height:1.6;">此邮件由系统自动发送，请勿回复。</p>
+    </div>
+</body>
+</html>"""
         
         # 纯文本版本（备用）
-        text_content = f"""
-        码言 Nano Banana Pro - 注册验证码
-        
-        您好！
-        
-        感谢您注册码言 Nano Banana Pro。请使用以下验证码完成注册：
-        
-        验证码：{verification_code}
-        
-        验证码将在 10 分钟后失效，请尽快完成注册。
-        
-        如果这不是您的操作，请忽略此邮件。
-        
-        此邮件由系统自动发送，请勿回复。
-        © 2026 码言 Nano Banana Pro. All rights reserved.
-        """
+        text_content = f"""码言 Nano Banana
+
+请使用以下验证码完成注册：
+
+验证码：{verification_code}
+
+验证码将在 10 分钟后失效，请勿向他人透露。
+
+如果这不是您的操作，请忽略此邮件。
+
+此邮件由系统自动发送，请勿回复。"""
         
         # 添加邮件内容
         part1 = MIMEText(text_content, 'plain', 'utf-8')
