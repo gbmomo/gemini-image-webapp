@@ -11,12 +11,72 @@ import string
 import hashlib
 import logging
 from contextlib import contextmanager
+from cryptography.fernet import Fernet, InvalidToken
 from werkzeug.security import generate_password_hash, check_password_hash
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
 DATABASE_FILE = os.getenv("DATABASE_FILE", "data/users.db")
+ENCRYPTED_CREDENTIAL_PREFIX = "fernet:v1:"
+
+
+class CredentialEncryptionError(RuntimeError):
+    """凭据加密配置缺失、无效或无法解密。"""
+
+
+def _get_credential_fernet(required=False):
+    raw_key = (os.getenv("CREDENTIAL_ENCRYPTION_KEY") or "").strip()
+    if not raw_key:
+        if required:
+            raise CredentialEncryptionError(
+                "请配置 CREDENTIAL_ENCRYPTION_KEY 后再使用数据库凭据存储"
+            )
+        return None
+    try:
+        # Fernet 密钥是 32 字节 URL-safe Base64，标准文本为 43 个有效字符
+        # 加一个末尾填充符“=”。部分部署面板保存环境变量时会去掉该填充符；
+        # 它不包含密钥熵，因此在严格校验字符和长度后可安全恢复。
+        if not re.fullmatch(r"[A-Za-z0-9_-]{43}=?", raw_key):
+            raise ValueError("invalid Fernet key encoding")
+        normalized_key = raw_key + ("=" if len(raw_key) == 43 else "")
+        return Fernet(normalized_key.encode("ascii"))
+    except (ValueError, TypeError, UnicodeEncodeError) as exc:
+        raise CredentialEncryptionError(
+            "CREDENTIAL_ENCRYPTION_KEY 格式无效，必须是 Fernet.generate_key() "
+            "生成的密钥（允许省略末尾的 =）"
+        ) from exc
+
+
+def _encrypt_credential(value):
+    if value is None:
+        return None
+    cipher = _get_credential_fernet(required=True)
+    token = cipher.encrypt(value.encode("utf-8")).decode("ascii")
+    return ENCRYPTED_CREDENTIAL_PREFIX + token
+
+
+def _decrypt_credential(value):
+    if value is None or not value.startswith(ENCRYPTED_CREDENTIAL_PREFIX):
+        return value
+    cipher = _get_credential_fernet(required=True)
+    token = value[len(ENCRYPTED_CREDENTIAL_PREFIX):]
+    try:
+        return cipher.decrypt(token.encode("ascii")).decode("utf-8")
+    except (InvalidToken, ValueError, UnicodeError) as exc:
+        raise CredentialEncryptionError(
+            "数据库凭据无法解密，请检查 CREDENTIAL_ENCRYPTION_KEY 是否与加密时一致"
+        ) from exc
+
+
+def _harden_private_path(path, mode):
+    """POSIX 下移除组用户和其他用户权限；Windows 权限由部署 ACL 管理。"""
+    if os.name != "posix" or not os.path.exists(path):
+        return
+    try:
+        os.chmod(path, mode)
+    except OSError as exc:
+        logger.warning("无法收紧敏感路径权限: %s", exc)
 
 
 def _get_busy_timeout_ms():
@@ -30,8 +90,10 @@ def get_db_connection():
     """获取数据库连接"""
     busy_timeout_ms = _get_busy_timeout_ms()
     conn = sqlite3.connect(DATABASE_FILE, timeout=busy_timeout_ms / 1000)
+    _harden_private_path(DATABASE_FILE, 0o600)
     conn.row_factory = sqlite3.Row  # 返回字典形式的结果
     conn.execute("PRAGMA foreign_keys = ON")
+    conn.execute("PRAGMA secure_delete = ON")
     conn.execute(f"PRAGMA busy_timeout = {busy_timeout_ms}")
     return conn
 
@@ -206,6 +268,7 @@ def init_db():
     database_directory = os.path.dirname(os.path.abspath(DATABASE_FILE))
     if database_directory:
         os.makedirs(database_directory, exist_ok=True)
+        _harden_private_path(database_directory, 0o700)
     with get_db() as conn:
         # 启用 WAL 模式提升并发性能（数据库级别持久设置，只需设置一次）
         conn.execute("PRAGMA journal_mode=WAL")
@@ -336,32 +399,30 @@ def create_admin_user():
         ).fetchone()
         configured_password = os.getenv("ADMIN_PASSWORD")
 
-        if admin is not None:
-            if configured_password:
-                cursor.execute(
-                    "UPDATE users SET password_hash = ?, is_admin = 1 WHERE id = ?",
-                    (generate_password_hash(configured_password), admin["id"]),
+        if not configured_password:
+            raise ValueError("请设置环境变量 ADMIN_PASSWORD，程序不会把临时管理员密码写入日志")
+        if os.getenv("FLASK_ENV") == "production":
+            password_classes = sum((
+                bool(re.search(r"[a-z]", configured_password)),
+                bool(re.search(r"[A-Z]", configured_password)),
+                bool(re.search(r"\d", configured_password)),
+                bool(re.search(r"[^A-Za-z0-9]", configured_password)),
+            ))
+            if len(configured_password) < 12 or password_classes < 3:
+                raise ValueError(
+                    "生产环境 ADMIN_PASSWORD 至少需要 12 个字符并包含至少三类字符"
                 )
-            else:
-                cursor.execute("UPDATE users SET is_admin = 1 WHERE id = ?", (admin["id"],))
-            return
 
-        admin_password = configured_password
-        if not admin_password:
-            admin_password = ''.join(
-                secrets.choice(string.ascii_letters + string.digits + string.punctuation)
-                for _ in range(16)
+        if admin is not None:
+            cursor.execute(
+                "UPDATE users SET password_hash = ?, is_admin = 1 WHERE id = ?",
+                (generate_password_hash(configured_password), admin["id"]),
             )
-            logger.warning("=" * 60)
-            logger.warning("⚠️  警告：未设置 ADMIN_PASSWORD 环境变量！")
-            logger.warning(f"⚠️  已自动生成管理员密码: {admin_password}")
-            logger.warning("⚠️  请立即保存此密码，并在首次登录后修改！")
-            logger.warning("⚠️  建议：在 .env 文件中设置 ADMIN_PASSWORD=your_password")
-            logger.warning("=" * 60)
+            return
 
         cursor.execute(
             "INSERT INTO users (username, password_hash, is_admin) VALUES (?, ?, ?)",
-            ("admin", generate_password_hash(admin_password), 1),
+            ("admin", generate_password_hash(configured_password), 1),
         )
         logger.info("✅ 管理员账号创建成功: admin")
 
@@ -804,8 +865,9 @@ def create_verification_code(email, code_hash, expires_at):
                 (email, code_hash, expires_at)
             )
         return True, "验证码已创建"
-    except Exception as e:
-        return False, f"创建验证码失败: {str(e)}"
+    except Exception:
+        logger.exception("创建验证码记录失败")
+        return False, "验证码服务暂时不可用"
 
 
 def delete_verification_code(email, code_hash):
@@ -918,7 +980,7 @@ def cleanup_expired_codes():
 
 
 def get_active_api_settings():
-    """获取当前激活的 API 设置"""
+    """获取当前激活的 API 设置，并仅在内存中解密敏感字段。"""
     with get_db() as conn:
         cursor = conn.cursor()
         cursor.execute("SELECT * FROM api_settings WHERE is_active = 1 ORDER BY updated_at DESC LIMIT 1")
@@ -928,17 +990,70 @@ def get_active_api_settings():
         return {
             "id": row["id"],
             "provider": row["provider"],
-            "api_key": row["api_key"],
+            "api_key": _decrypt_credential(row["api_key"]),
             "custom_base_url": row["custom_base_url"],
             "default_model": row["default_model"] if "default_model" in row.keys() else 'gemini-3.1-flash-image',
             "email_sender": row["email_sender"] if "email_sender" in row.keys() else None,
-            "email_password": row["email_password"] if "email_password" in row.keys() else None,
+            "email_password": _decrypt_credential(row["email_password"])
+                if "email_password" in row.keys() else None,
             "smtp_server": row["smtp_server"] if "smtp_server" in row.keys() else None,
             "smtp_port": row["smtp_port"] if "smtp_port" in row.keys() else None,
             "is_active": row["is_active"] == 1,
             "updated_at": row["updated_at"]
         }
     return None
+
+
+def migrate_api_settings_credentials():
+    """加密当前配置并移除历史凭据副本；可安全重复执行。"""
+    changed = False
+    with get_db() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        rows = conn.execute(
+            '''SELECT * FROM api_settings
+               ORDER BY is_active DESC, updated_at DESC, id DESC'''
+        ).fetchall()
+        if not rows:
+            return False
+
+        current = rows[0]
+        api_key = current["api_key"]
+        email_password = current["email_password"] if "email_password" in current.keys() else None
+        # 即使已经加密也先解密一次，以便尽早发现部署密钥错误。
+        plain_api_key = _decrypt_credential(api_key)
+        plain_email_password = _decrypt_credential(email_password)
+        encrypted_api_key = api_key
+        encrypted_email_password = email_password
+        if not api_key.startswith(ENCRYPTED_CREDENTIAL_PREFIX):
+            encrypted_api_key = _encrypt_credential(plain_api_key)
+            changed = True
+        if email_password and not email_password.startswith(ENCRYPTED_CREDENTIAL_PREFIX):
+            encrypted_email_password = _encrypt_credential(plain_email_password)
+            changed = True
+
+        conn.execute(
+            '''UPDATE api_settings
+               SET api_key = ?, email_password = ?, is_active = 1
+               WHERE id = ?''',
+            (encrypted_api_key, encrypted_email_password, current["id"]),
+        )
+        deleted = conn.execute(
+            "DELETE FROM api_settings WHERE id <> ?", (current["id"],)
+        ).rowcount
+        changed = changed or deleted > 0 or current["is_active"] != 1
+
+    if changed:
+        # 截断 WAL 并重写数据库页，尽量移除旧明文残留。
+        try:
+            conn = get_db_connection()
+            try:
+                conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+                conn.execute("VACUUM")
+            finally:
+                conn.close()
+        except sqlite3.Error as exc:
+            logger.warning("凭据迁移完成，但数据库空间清理失败: %s", exc)
+    return changed
 
 
 def save_api_settings(provider, api_key, custom_base_url=None, default_model='gemini-3.1-flash-image', email_sender=None, email_password=None, smtp_server=None, smtp_port=None):
@@ -957,31 +1072,54 @@ def save_api_settings(provider, api_key, custom_base_url=None, default_model='ge
 
 
     try:
+        encrypted_api_key = _encrypt_credential(api_key.strip())
+        encrypted_email_password = (
+            _encrypt_credential(email_password.strip()) if email_password else None
+        )
         with get_db() as conn:
+            conn.execute("BEGIN IMMEDIATE")
             cursor = conn.cursor()
-
-            # 将所有现有设置设为非激活
-            cursor.execute("UPDATE api_settings SET is_active = 0")
-
-            # 插入新的激活设置
-            cursor.execute(
-                "INSERT INTO api_settings (provider, api_key, custom_base_url, default_model, email_sender, email_password, smtp_server, smtp_port, is_active, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?)",
-                (
-                    provider,
-                    api_key.strip(),
-                    custom_base_url.strip() if custom_base_url else None,
-                    default_model.strip() if default_model else 'gemini-3.1-flash-image',
-                    email_sender.strip() if email_sender else None,
-                    email_password.strip() if email_password else None,
-                    smtp_server.strip() if smtp_server else None,
-                    int(smtp_port) if smtp_port else None,
-                    datetime.now().isoformat()
-                )
+            current = cursor.execute(
+                '''SELECT id FROM api_settings
+                   ORDER BY is_active DESC, updated_at DESC, id DESC LIMIT 1'''
+            ).fetchone()
+            values = (
+                provider,
+                encrypted_api_key,
+                custom_base_url.strip() if custom_base_url else None,
+                default_model.strip() if default_model else 'gemini-3.1-flash-image',
+                email_sender.strip() if email_sender else None,
+                encrypted_email_password,
+                smtp_server.strip() if smtp_server else None,
+                int(smtp_port) if smtp_port else None,
+                datetime.now().isoformat(),
             )
-        return True, "API 设置已保存"
-    except Exception as e:
-        logger.error(f"保存 API 设置失败: {e}")
-        return False, f"保存失败: {str(e)}"
+            if current:
+                cursor.execute(
+                    '''UPDATE api_settings SET
+                       provider = ?, api_key = ?, custom_base_url = ?,
+                       default_model = ?, email_sender = ?, email_password = ?,
+                       smtp_server = ?, smtp_port = ?, is_active = 1, updated_at = ?
+                       WHERE id = ?''',
+                    values + (current["id"],),
+                )
+                cursor.execute("DELETE FROM api_settings WHERE id <> ?", (current["id"],))
+            else:
+                cursor.execute(
+                    '''INSERT INTO api_settings
+                       (provider, api_key, custom_base_url, default_model,
+                        email_sender, email_password, smtp_server, smtp_port,
+                        is_active, updated_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?)''',
+                    values,
+                )
+        return True, "API 设置已加密保存"
+    except CredentialEncryptionError as exc:
+        logger.error("保存 API 设置失败: %s", exc)
+        return False, str(exc)
+    except Exception:
+        logger.exception("保存 API 设置失败")
+        return False, "保存失败，请检查服务器日志"
 
 
 def get_model_pricing():
@@ -1004,13 +1142,15 @@ def save_model_pricing(prices):
                  for (model_id, image_size), credits in prices.items()]
             )
         return True, "模型价格已保存"
-    except Exception as e:
-        logger.error(f"保存模型价格失败: {e}")
-        return False, f"保存失败: {str(e)}"
+    except Exception:
+        logger.exception("保存模型价格失败")
+        return False, "保存失败，请检查服务器日志"
 
 
 # 应用启动时自动初始化数据库
 init_db()
+# 加密当前 API/SMTP 凭据并清除历史配置副本
+migrate_api_settings_credentials()
 # 创建管理员账号
 create_admin_user()
 

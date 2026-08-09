@@ -12,6 +12,9 @@ from unittest.mock import MagicMock, patch
 _IMPORT_TEMP_DIR = tempfile.TemporaryDirectory()
 os.environ["DATABASE_FILE"] = os.path.join(_IMPORT_TEMP_DIR.name, "import.sqlite")
 os.environ["ADMIN_PASSWORD"] = "ImportAdmin123"
+os.environ["CREDENTIAL_ENCRYPTION_KEY"] = (
+    "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA="
+)
 
 import database  # noqa: E402
 import email_service  # noqa: E402
@@ -133,6 +136,86 @@ class DatabaseTests(unittest.TestCase):
 
         self.assertFalse(database.verify_user("admin", "InitialAdmin123")[0])
         self.assertTrue(database.verify_user("admin", "RotatedAdmin456")[0])
+
+    def test_api_settings_are_encrypted_and_history_is_not_retained(self):
+        self.assertTrue(database.save_api_settings(
+            "google_ai",
+            "first-plaintext-api-key",
+            email_sender="sender@example.com",
+            email_password="first-plaintext-email-password",
+            smtp_server="smtp.example.com",
+            smtp_port=465,
+        )[0])
+
+        with closing(sqlite3.connect(self.database_file)) as connection:
+            first_row = connection.execute(
+                "SELECT api_key, email_password FROM api_settings"
+            ).fetchone()
+        self.assertTrue(first_row[0].startswith(database.ENCRYPTED_CREDENTIAL_PREFIX))
+        self.assertTrue(first_row[1].startswith(database.ENCRYPTED_CREDENTIAL_PREFIX))
+        self.assertNotIn("first-plaintext", first_row[0] + first_row[1])
+        self.assertEqual("first-plaintext-api-key", database.get_active_api_settings()["api_key"])
+
+        self.assertTrue(database.save_api_settings(
+            "google_ai", "second-plaintext-api-key"
+        )[0])
+        with closing(sqlite3.connect(self.database_file)) as connection:
+            rows = connection.execute(
+                "SELECT api_key, is_active FROM api_settings"
+            ).fetchall()
+        self.assertEqual(1, len(rows))
+        self.assertEqual(1, rows[0][1])
+        self.assertNotIn("second-plaintext", rows[0][0])
+        self.assertEqual("second-plaintext-api-key", database.get_active_api_settings()["api_key"])
+
+    def test_plaintext_api_settings_migration_encrypts_current_and_prunes_history(self):
+        with closing(sqlite3.connect(self.database_file)) as connection, connection:
+            connection.execute(
+                '''INSERT INTO api_settings
+                   (provider, api_key, is_active, updated_at)
+                   VALUES ('google_ai', 'old-key', 0, '2026-01-01T00:00:00')'''
+            )
+            connection.execute(
+                '''INSERT INTO api_settings
+                   (provider, api_key, email_password, is_active, updated_at)
+                   VALUES ('google_ai', 'current-key', 'smtp-secret', 1,
+                           '2026-01-02T00:00:00')'''
+            )
+
+        self.assertTrue(database.migrate_api_settings_credentials())
+
+        with closing(sqlite3.connect(self.database_file)) as connection:
+            rows = connection.execute(
+                "SELECT api_key, email_password, is_active FROM api_settings"
+            ).fetchall()
+        self.assertEqual(1, len(rows))
+        self.assertTrue(rows[0][0].startswith(database.ENCRYPTED_CREDENTIAL_PREFIX))
+        self.assertTrue(rows[0][1].startswith(database.ENCRYPTED_CREDENTIAL_PREFIX))
+        self.assertEqual(1, rows[0][2])
+        settings = database.get_active_api_settings()
+        self.assertEqual("current-key", settings["api_key"])
+        self.assertEqual("smtp-secret", settings["email_password"])
+
+    def test_database_credential_save_requires_encryption_key(self):
+        with patch.dict(os.environ, {"CREDENTIAL_ENCRYPTION_KEY": ""}):
+            success, message = database.save_api_settings("google_ai", "api-key")
+        self.assertFalse(success)
+        self.assertIn("CREDENTIAL_ENCRYPTION_KEY", message)
+
+    def test_credential_key_accepts_missing_base64_padding(self):
+        canonical_key = "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA="
+        with patch.dict(
+            os.environ,
+            {"CREDENTIAL_ENCRYPTION_KEY": canonical_key.removesuffix("=")},
+        ):
+            cipher = database._get_credential_fernet(required=True)
+            token = cipher.encrypt(b"credential")
+            self.assertEqual(b"credential", cipher.decrypt(token))
+
+    def test_credential_key_still_rejects_invalid_values(self):
+        with patch.dict(os.environ, {"CREDENTIAL_ENCRYPTION_KEY": "not-a-key"}):
+            with self.assertRaises(database.CredentialEncryptionError):
+                database._get_credential_fernet(required=True)
 
     def test_delete_user_rejects_missing_and_admin_users(self):
         self.assertFalse(database.delete_user(987654)[0])

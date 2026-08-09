@@ -696,7 +696,7 @@ async function saveApiSettings() {
     const smtpPort = document.getElementById('smtpPort').value.trim();
 
     // 如果尚未配置任何 API，必须填写。如果已经配置过，可以传空，后端会复用原有配置
-    if (!apiKey && !window.currentApiSettings?.configured) {
+    if (!apiKey && (!window.currentApiSettings?.configured || window.currentApiSettings?.source === 'env')) {
         Modal.toast(I18n.t('api_key_required'), 'warning');
         return false;
     }

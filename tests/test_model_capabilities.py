@@ -7,7 +7,11 @@ from unittest.mock import patch
 
 
 _TEST_TEMP_DIR = tempfile.TemporaryDirectory()
-os.environ.setdefault("SECRET_KEY", "test-secret-key")
+os.environ.setdefault("SECRET_KEY", "test-only-secret-key-with-at-least-32-bytes")
+os.environ.setdefault(
+    "CREDENTIAL_ENCRYPTION_KEY",
+    "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=",
+)
 os.environ["DISABLE_BACKGROUND_TASKS"] = "true"
 os.environ.setdefault("DATABASE_FILE", os.path.join(_TEST_TEMP_DIR.name, "users.sqlite"))
 os.environ["DATA_DIR"] = os.path.join(_TEST_TEMP_DIR.name, "data")

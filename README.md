@@ -27,6 +27,10 @@
 
 > 本项目采用 [CC BY-NC-SA 4.0](LICENSE) 许可证。使用时必须署名原作者 [@gbmomo](https://github.com/gbmomo)，并提供[原项目链接](https://github.com/gbmomo/gemini-image-webapp)；未经单独授权不得商用，修改后的作品须以相同许可证发布。商用授权联系：S@gitsay.com，QQ：550948321，微信：Goblin_MoMo。
 
+## 快速导航
+
+[当前功能](#当前功能) · [快速开始](#快速开始) · [环境变量](#环境变量) · [宝塔面板部署](#宝塔面板部署新手推荐) · [安全边界](#数据存储与安全边界) · [常见问题](#常见问题)
+
 ## 当前功能
 
 - 文生图、参考图生图和带上下文的多轮图片迭代。参考图可通过文件选择、拖拽或粘贴添加。
@@ -107,17 +111,24 @@ copy .env.example .env
 cp .env.example .env
 ```
 
-至少设置以下两项：
+至少设置以下三项：
 
 ```env
 SECRET_KEY=请替换为高强度随机字符串
 ADMIN_PASSWORD=请替换为管理员密码
+CREDENTIAL_ENCRYPTION_KEY=请替换为独立的Fernet密钥
 ```
 
 可用下面的命令生成 `SECRET_KEY`：
 
 ```bash
 python -c "import secrets; print(secrets.token_hex(32))"
+```
+
+用于加密后台 API/SMTP 凭据的密钥必须独立生成，不要复用 `SECRET_KEY`：
+
+```bash
+python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 ```
 
 启动应用：
@@ -128,7 +139,7 @@ python app.py
 
 访问 `http://127.0.0.1:5000`，用账号 `admin` 和 `ADMIN_PASSWORD` 登录，再进入管理后台配置 Gemini API 和 SMTP。也可以直接在 `.env` 中设置 `GEMINI_API_KEY` 及邮件参数。
 
-`ADMIN_PASSWORD` 会在应用启动时同步到已有的 `admin` 账号。首次启动未配置它时，程序会生成随机密码并写入启动日志；生产环境应始终显式配置。
+`ADMIN_PASSWORD` 会在应用启动时同步到已有的 `admin` 账号。未配置时应用会拒绝启动；生产环境要求至少 12 个字符，并包含至少三类字符。
 
 ## 环境变量
 
@@ -139,7 +150,8 @@ python app.py
 | 变量 | 默认值 | 说明 |
 |---|---|---|
 | `SECRET_KEY` | 无 | Flask Session 和 CSRF 签名密钥，必须设置 |
-| `ADMIN_PASSWORD` | 首次启动随机生成 | `admin` 账号密码，生产环境必须设置 |
+| `ADMIN_PASSWORD` | 无 | `admin` 账号密码，必须设置；生产环境至少 12 个字符和三类字符 |
+| `CREDENTIAL_ENCRYPTION_KEY` | 无 | 后台数据库凭据的独立 Fernet 密钥；使用后台 API/SMTP 设置时必须设置 |
 | `GEMINI_API_KEY` | 空 | Gemini API Key；也可在后台保存 |
 | `GEMINI_API_BASE_URL` | 空 | 自定义兼容端点；设置后环境变量模式使用 `custom` Provider |
 | `DEFAULT_MODEL` | `gemini-3.1-flash-image` | 默认模型，必须是上表中的模型 ID |
@@ -199,14 +211,15 @@ python app.py
 
 | 数据 | 存储位置 | 实际保护方式 |
 |---|---|---|
-| 用户、验证码、卡密、API/SMTP 设置、价格、扣费账本 | SQLite，默认 `data/users.db` | 密码和验证码使用带盐哈希；卡密保存验证哈希、SHA-256 查找值和前缀 |
+| 用户、验证码、卡密、API/SMTP 设置、价格、扣费账本 | SQLite，默认 `data/users.db` | 密码和验证码使用带盐哈希；卡密保存验证哈希、SHA-256 查找值和前缀；API Key 与 SMTP 密码使用 Fernet 加密 |
 | 会话与消息 | `data/sessions/user_<id>.json` | 本地明文 JSON；文件锁、临时文件、`fsync` 和原子替换 |
 | 生成图、参考图、缩略图 | `static/images`、`static/thumbnails` | 本地明文文件；HTTP 访问仅允许文件所有者或管理员 |
 
 请注意以下边界：
 
-- API Key、SMTP 密码、邮箱、会话 JSON 和图片没有静态加密。它们依赖部署机器的文件权限、磁盘加密和备份策略保护。
+- API Key 和 SMTP 密码使用 `CREDENTIAL_ENCRYPTION_KEY` 加密后保存；该密钥必须与数据库和备份分开保管。邮箱、会话 JSON 和图片仍依赖部署机器的文件权限、磁盘加密和备份策略保护。
 - Flask Session Cookie 是签名数据，不应把 `SECRET_KEY` 理解为数据库或文件加密密钥。
+- 每次保存 API/SMTP 设置只保留当前配置；首次使用新版本启动会加密当前配置、删除历史配置并重写 SQLite 页面。升级前仍应轮换曾经明文保存过的第三方凭据，并清理旧备份。
 - 生成时，提示词、会话上下文和参考图会发送给配置的 Gemini/API Provider；注册时，收件邮箱和验证码会发送给配置的 SMTP 服务。部署者需要按所用服务商条款向用户说明数据处理方式。
 - 应备份 SQLite 数据库、`data/sessions`、图片和缩略图目录；只备份数据库不能恢复完整历史。
 
@@ -214,37 +227,377 @@ python app.py
 
 ## 生产部署
 
-推荐使用 Gunicorn 放在 Nginx 等 HTTPS 反向代理之后。Gemini SDK 超时为 300 秒，因此 Gunicorn 和反向代理超时应更长：
+推荐的部署结构是：浏览器通过 HTTPS 访问 Nginx，Nginx 再把请求转发给只监听本机 `127.0.0.1:5000` 的 Gunicorn。不要直接使用 `python app.py` 对外提供生产服务，也不需要向公网开放 5000 端口。
+
+对于个人站点和中小流量服务器，推荐先使用下面的单 worker、多线程配置：
 
 ```bash
 gunicorn -w 1 --threads 8 -b 127.0.0.1:5000 --timeout 360 app:app
 ```
 
-单层 Nginx 的关键配置示例：
+- `-w 1` 表示一个应用进程，默认内存限流可以正常工作，不需要 Redis。
+- `--threads 8` 表示该进程可以并行等待多个网络请求，并不等于网站只能供一个用户使用。
+- `--timeout 360` 为 AI 生图留出足够时间，Nginx 的发送和读取超时也应设置为 360 秒。
+
+### 宝塔面板部署（新手推荐）
+
+下面的步骤适用于 Linux 服务器上的宝塔面板。不同宝塔版本的按钮名称可能略有差异，但配置项含义相同。
+
+> 截图使用当前宝塔界面，敏感值均已打码。截图中的 `GitSay_Gemini_nano` 是部署示例；实际填写时，项目名称和路径可以不同，但同一处配置中的路径必须互相对应。
+
+#### 1. 准备服务器和域名
+
+开始前请准备：
+
+1. 一台已安装宝塔面板的 Linux 服务器。
+2. 在宝塔「软件商店」中安装 Nginx。
+3. 一个已通过 A/AAAA 记录解析到服务器的域名。
+4. 项目代码和一个可用的 Gemini API Key，或兼容 Gemini API 协议的自定义服务。
+
+建议先备份旧版本的 `data/`、`static/images/` 和 `static/thumbnails/`。如果迁移已有数据库，还必须保留原来的 `CREDENTIAL_ENCRYPTION_KEY`，否则已加密的 API/SMTP 凭据无法解密。
+
+#### 2. 安装 Python 并创建虚拟环境
+
+进入宝塔的「网站」→「Python 项目」→「Python 环境管理」→「版本管理」，安装 Python 3.10 或更高版本。
+
+<p align="center">
+  <img src="Display pictures/BT/python版本安装界面.png" alt="宝塔 Python 版本安装界面" width="80%">
+</p>
+
+安装完成后点击「创建虚拟环境」，为本项目创建独立环境，例如命名为 `gemini_image_webapp`。虚拟环境能避免不同项目的 Python 包互相冲突。
+
+<p align="center">
+  <img src="Display pictures/BT/创建虚拟环境界面.png" alt="宝塔创建 Python 虚拟环境" width="80%">
+</p>
+
+#### 3. 上传或拉取项目
+
+可在宝塔「文件」中把项目上传到 `/www/wwwroot/gemini-image-webapp`，也可以打开宝塔终端执行：
+
+```bash
+cd /www/wwwroot
+git clone https://github.com/gbmomo/gemini-image-webapp.git
+cd gemini-image-webapp
+```
+
+不要上传本地 `.env`、开发数据库或测试数据到公共仓库。通过宝塔上传旧数据时，确认 `www` 运行用户可以写入 `data/`、`static/images/` 和 `static/thumbnails/`；不要为了省事设置 `chmod -R 777`。
+
+#### 4. 添加 Python 项目
+
+在「Python 项目」页面点击「添加项目」，按下表填写：
+
+| 配置项 | 推荐填写 |
+|---|---|
+| 项目名称 | `gemini-image-webapp` |
+| Python 环境 | 上一步创建的虚拟环境 |
+| 启动方式 | 命令行启动或 Gunicorn |
+| 项目路径 | `/www/wwwroot/gemini-image-webapp` |
+| 启动命令 | `gunicorn -w 1 --threads 8 -b 127.0.0.1:5000 --timeout 360 app:app` |
+| 环境变量 | 选择「指定变量」 |
+| 启动用户 | `www` |
+| 安装依赖 | `/www/wwwroot/gemini-image-webapp/requirements.txt` |
+
+<p align="center">
+  <img src="Display pictures/BT/宝塔面板添加python项目.png" alt="宝塔添加 Python 项目" width="80%">
+</p>
+
+上图已更新为当前推荐配置。请重点核对启动命令包含 `-w 1 --threads 8 -b 127.0.0.1:5000 --timeout 360`，并确认 Python 环境、项目路径和 `requirements.txt` 路径都属于同一个项目。
+
+如果宝塔没有自动安装依赖，可在已经激活该虚拟环境的终端中执行：
+
+```bash
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+```
+
+#### 5. 配置生产环境变量
+
+先在已安装项目依赖的虚拟环境或自己的电脑上生成两个不同的随机密钥：
+
+```bash
+python -c "import secrets; print(secrets.token_hex(32))"
+python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+```
+
+然后在宝塔项目的「环境变量」中选择「指定变量」，逐行填写：
+
+```env
+SECRET_KEY=第一个命令生成的随机值
+ADMIN_PASSWORD=至少12位且包含大小写字母数字或符号中的三类
+CREDENTIAL_ENCRYPTION_KEY=第二个命令生成的Fernet密钥
+FLASK_ENV=production
+FLASK_DEBUG=False
+TRUST_PROXY_COUNT=1
+```
+
+API 配置有两种方式，二选一即可：
+
+- 推荐：项目启动后使用 `admin` 登录，在管理后台保存 API Key 和自定义端点；敏感字段会加密存入数据库。
+- 或者：继续在宝塔环境变量中增加 `GEMINI_API_KEY=你的Key`，使用自定义服务时再增加 `GEMINI_API_BASE_URL=https://你的兼容端点`。
+
+需要邮件验证码注册时，再配置：
+
+```env
+EMAIL_SENDER=发件邮箱
+EMAIL_PASSWORD=SMTP密码或授权码
+SMTP_SERVER=SMTP服务器
+SMTP_PORT=465
+```
+
+<p align="center">
+  <img src="Display pictures/BT/环境变量配置界面.png" alt="宝塔 Python 项目环境变量配置" width="80%">
+</p>
+
+上图中的密钥内容已特意打码。保存前请确认环境变量列表中包含 `SECRET_KEY`、`ADMIN_PASSWORD`、`CREDENTIAL_ENCRYPTION_KEY`、`FLASK_ENV=production`、`FLASK_DEBUG=False` 和 `TRUST_PROXY_COUNT=1`；不要公开包含真实密钥的截图。
+
+密钥注意事项：
+
+- 不要直接使用 `.env.example` 中的示例值，也不要把密钥发到聊天、Issue 或截图中。
+- `SECRET_KEY` 变更会让已有登录会话失效。
+- `CREDENTIAL_ENCRYPTION_KEY` 必须长期保存；使用同一数据库时不能随意更换。建议把它与数据库备份分开保存在密码管理器或云厂商密钥服务中。
+- 标准 Fernet 密钥为 44 个字符并以 `=` 结尾；部分宝塔版本保存后会去掉这个 Base64 填充符。当前版本会在严格校验后自动补回，显示为 43 个字符也可以正常使用，但密钥主体不能缺失或改变。
+- 修改任何环境变量后都要重启项目。
+
+#### 6. 启动并检查运行状态
+
+点击「启动」或「重启」，确认项目状态为「运行中」，然后查看「项目日志」是否存在依赖缺失、端口占用或密钥错误。
+
+<p align="center">
+  <img src="Display pictures/BT/项目运行状态.png" alt="宝塔 Python 项目运行状态" width="80%">
+</p>
+
+可以在服务器终端执行以下命令检查本机服务：
+
+```bash
+curl -I http://127.0.0.1:5000/
+```
+
+此时不要开放安全组或宝塔防火墙的 5000 端口；下一步通过 Nginx 对外提供访问。
+
+#### 7. 绑定域名并开启外网映射
+
+进入项目设置的「域名管理」，添加已经解析到服务器的域名。通常使用 80 端口即可，HTTPS 会在下一步配置。
+
+<p align="center">
+  <img src="Display pictures/BT/域名绑定界面.png" alt="宝塔 Python 项目绑定域名" width="80%">
+</p>
+
+进入「外网映射」，开启代理并填写：
+
+| 配置项 | 值 |
+|---|---|
+| 代理路由 | `/` |
+| 代理端口 | `5000` |
+
+<p align="center">
+  <img src="Display pictures/BT/外网映射配置.png" alt="宝塔 Python 项目外网映射" width="80%">
+</p>
+
+宝塔会生成 Nginx 反向代理。确认代理目标是 `http://127.0.0.1:5000`，而不是把 Gunicorn 端口直接暴露到公网。
+
+#### 8. 申请 SSL 并强制 HTTPS
+
+进入该项目或对应网站的「SSL」页面，使用 Let's Encrypt、宝塔免费证书或自己的证书。签发成功后开启「强制 HTTPS」。
+
+<p align="center">
+  <img src="Display pictures/BT/SSL证书申请.png" alt="宝塔申请 SSL 证书" width="80%">
+</p>
+
+证书申请失败时，先检查域名解析是否已生效、80 端口是否开放，以及域名是否被其他站点占用。
+
+#### 9. 调整 Nginx 上传与超时
+
+在项目对应网站的「配置文件」中确认反向代理包含以下关键设置。宝塔已经生成的 SSL 证书路径和其他配置不要删除，只需合并缺少的内容：
 
 ```nginx
-server {
-    listen 443 ssl;
-    server_name example.com;
+client_max_body_size 50m;
 
-    client_max_body_size 50m;
-
-    location / {
-        proxy_pass http://127.0.0.1:5000;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_connect_timeout 360s;
-        proxy_send_timeout 360s;
-        proxy_read_timeout 360s;
-    }
+location / {
+    proxy_pass http://127.0.0.1:5000;
+    proxy_http_version 1.1;
+    proxy_set_header Connection "";
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Host $host;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_connect_timeout 60s;
+    proxy_send_timeout 360s;
+    proxy_read_timeout 360s;
 }
 ```
 
-同时设置 `FLASK_ENV=production`、`FLASK_DEBUG=False` 和 `TRUST_PROXY_COUNT=1`。`TRUST_PROXY_COUNT` 只能等于实际可信代理层数，不要在应用直接暴露公网时启用。确保运行用户可写数据库、`DATA_DIR`、`IMAGES_DIR` 和 `THUMBNAILS_DIR`。
+与宝塔自动生成的完整配置合并时，请按以下原则取舍：
 
-默认 `memory://` 限流只适合单 worker。使用多个 worker 时配置 Redis，例如 `RATELIMIT_STORAGE_URI=redis://127.0.0.1:6379/0`。应用没有 WebSocket 或流式输出要求。
+- 保留宝塔管理的证书路径、`/.well-known/` 证书验证、访问日志和错误日志，不要把示例路径覆盖到自己的服务器。
+- 本机 Gunicorn 的连接建立超时使用 `proxy_connect_timeout 60s`；上传和等待生图响应使用 `proxy_send_timeout 360s`、`proxy_read_timeout 360s`。Nginx 官方说明连接建立超时通常无法超过 75 秒，因此没有必要把 `proxy_connect_timeout` 设为 360 秒。
+- 本项目不依赖 WebSocket，删除 `proxy_set_header Upgrade $http_upgrade` 和 `proxy_set_header Connection "upgrade"`；也不需要非标准的 `REMOTE-HOST` 请求头。
+- `X-Forwarded-Host` 应使用 `$host`，这样同一个站点绑定多个域名时不会总是传递 `server_name` 中的第一个域名。
+- 不要为登录、API、管理后台和用户图片启用 Nginx 代理缓存。若模板生成了 `location ~ /purge`、`proxy_cache_purge` 或 `add_header X-Cache`，而你没有明确配置缓存，请删除这些残留项。
+- 如果在 `server` 层设置了 HSTS、`X-Frame-Options` 等 `add_header`，不要只在 `location /` 内单独增加一个 `add_header X-Cache`。传统 Nginx 继承规则是：当前层只要定义了任意 `add_header`，上层的全部 `add_header` 就不会自动继承。详见 [Nginx `add_header` 文档](https://nginx.org/en/docs/http/ngx_http_headers_module.html)。
+- `/health` 中直接 `return 200` 只能证明 Nginx 正常，不能证明 Gunicorn、数据库或上游 API 正常；可用于 Nginx 存活检查，不应当作完整应用健康检查。
+- HTTP/3/QUIC 与应用功能无关，是否启用交给宝塔和当前 Nginx 版本管理。启用时需要开放 UDP 443，并确保所有 `server_name` 域名都包含在证书中。不要把其他服务器的 `Alt-Svc` 草稿协议列表直接复制过来；可参考 [Nginx HTTP/3 文档](https://nginx.org/en/docs/http/ngx_http_v3_module.html)。
+
+保存前使用宝塔的配置检查功能或执行 `nginx -t`，确认无误后再重载 Nginx。
+
+<details>
+<summary>展开查看可复制的宝塔 Nginx 完整模板</summary>
+
+下面模板中的 `example.com`、`PROJECT_NAME` 和 `PROJECT_ROOT` 必须替换为自己的域名、宝塔项目名和项目绝对路径。宝塔自动生成的证书申请、扩展和监控日志配置可按面板实际内容保留。
+
+```nginx
+server
+{
+    listen 80;
+    listen 443 ssl;
+    listen 443 quic;
+    http2 on;
+    server_name example.com www.example.com;
+    index index.html index.htm default.htm default.html;
+    root PROJECT_ROOT;
+    server_tokens off;
+
+    include /www/server/panel/vhost/nginx/extension/PROJECT_NAME/*.conf;
+
+    #CERT-APPLY-CHECK--START
+    include /www/server/panel/vhost/nginx/well-known/PROJECT_NAME.conf;
+    #CERT-APPLY-CHECK--END
+
+    #SSL-START SSL相关配置
+    #error_page 404/404.html;
+    ssl_certificate /www/server/panel/vhost/cert/PROJECT_NAME/fullchain.pem;
+    ssl_certificate_key /www/server/panel/vhost/cert/PROJECT_NAME/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers EECDH+CHACHA20:EECDH+CHACHA20-draft:EECDH+AES128:RSA+AES128:EECDH+AES256:RSA+AES256:!MD5:!3DES;
+    ssl_prefer_server_ciphers on;
+    ssl_session_cache shared:SSL:10m;
+    ssl_session_timeout 10m;
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+    add_header Alt-Svc 'h3=":443"; ma=86400' always;
+    error_page 497 https://$host$request_uri;
+    #SSL-END
+
+    add_header X-Frame-Options "DENY" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+
+    client_max_body_size 50M;
+
+    if ($scheme = http) {
+        return 301 https://$host$request_uri;
+    }
+
+    #ERROR-PAGE-START  错误页相关配置
+    #error_page 404 /404.html;
+    #error_page 502 /502.html;
+    #ERROR-PAGE-END
+
+    #REWRITE-START  伪静态相关配置
+    include /www/server/panel/vhost/rewrite/python_PROJECT_NAME.conf;
+    #REWRITE-END
+
+    location ~* (^|/)(\.env.*|\.user\.ini|\.htaccess|\.htpasswd|\.gitignore|\.gitattributes|LICENSE|README.*\.md|requirements\.txt|Dockerfile|docker-compose\.yml|pyproject\.toml|.*\.(py|pyc|pyo|db|sqlite|sqlite3|sql|log|bak|old|tmp))$
+    {
+        return 404;
+    }
+
+    location ~* ^/(data|tests|\.git|\.svn|\.vscode|\.idea|\.ssh|\.github|\.cache|\.venv|venv|__pycache__|node_modules|runtime)(/|$)
+    {
+        return 404;
+    }
+
+    location /.well-known/ {
+        root /www/wwwroot/java_node_ssl;
+    }
+
+    if ($uri ~ "^/\.well-known/.*\.(php|jsp|py|js|css|lua|ts|go|zip|tar\.gz|rar|7z|sql|bak)$") {
+        return 403;
+    }
+
+    location = /health {
+        access_log off;
+        default_type text/plain;
+        return 200 "OK\n";
+    }
+
+    location / {
+        proxy_pass http://127.0.0.1:5000;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        proxy_hide_header Strict-Transport-Security;
+        proxy_hide_header X-Frame-Options;
+        proxy_hide_header X-Content-Type-Options;
+        proxy_hide_header X-XSS-Protection;
+        proxy_hide_header Referrer-Policy;
+
+        proxy_connect_timeout 60s;
+        proxy_send_timeout 360s;
+        proxy_read_timeout 360s;
+    }
+
+    access_log /www/wwwlogs/PROJECT_NAME.log;
+    error_log /www/wwwlogs/PROJECT_NAME.error.log;
+}
+```
+
+</details>
+
+#### 10. 最终检查与备份
+
+依次验证：
+
+1. 使用 `https://你的域名` 打开网站，确认没有重定向循环且浏览器证书正常。
+2. 使用 `admin` 和 `ADMIN_PASSWORD` 登录。
+3. 在管理后台保存 API 配置并生成一张测试图片。
+4. 如果配置了 SMTP，注册一个测试账号并检查验证码邮件。
+5. 确认普通用户无法访问其他用户的原图和缩略图。
+
+日常备份至少应包含：
+
+- `data/users.db`
+- `data/sessions/`
+- `static/images/`
+- `static/thumbnails/`
+
+`CREDENTIAL_ENCRYPTION_KEY` 也必须备份，但不要和数据库放在同一个公开下载包中。恢复时需要同时恢复数据库、文件目录和原加密密钥。
+
+#### 宝塔常见问题
+
+**项目启动失败**：先查看项目日志。常见原因是依赖没有安装、环境变量缺失、项目路径错误、端口 5000 已被其他进程占用，或者 `CREDENTIAL_ENCRYPTION_KEY` 与已有数据库不匹配。
+
+**访问域名出现 502**：确认 Python 项目处于运行中、Gunicorn 监听 `127.0.0.1:5000`，并确认 Nginx 的 `proxy_pass` 端口一致。
+
+**不断跳转或提示 HTTPS 错误**：确认环境变量为 `TRUST_PROXY_COUNT=1`，Nginx 设置了 `X-Forwarded-Proto $scheme`，并且只有一层可信反向代理。若实际使用 Cloudflare 加 Nginx，应根据真实代理链重新评估该值，不能盲目增加。
+
+**上传提示 413**：确认 Nginx 的 `client_max_body_size` 不小于应用的 `MAX_REQUEST_BYTES`。
+
+**生成经常超时**：Gunicorn 和 Nginx 的超时都应至少为 360 秒，同时检查上游 API 是否可访问。
+
+**数据库凭据无法解密**：恢复部署时使用了错误的 `CREDENTIAL_ENCRYPTION_KEY`。不要反复生成新值覆盖旧值，应找回与该数据库配套的原密钥。
+
+**宝塔保存后 Fernet 密钥末尾的 `=` 消失**：末尾的 `=` 是 Base64 填充符，当前版本兼容宝塔保存的 43 字符无填充形式。确认其他字符没有改变后重启项目即可；旧版本代码需要先更新。
+
+### worker 和 Redis 怎么选
+
+推荐命令中的 `-w 1 --threads 8` 已适合个人站点和中小流量服务，而且不需要 Redis。只有在监控确认单 worker 已成为瓶颈，并准备启动 `-w 2`、`-w 4`、多台服务器或多个容器实例时，才需要让所有进程共享限流计数：
+
+```env
+RATELIMIT_STORAGE_URI=redis://127.0.0.1:6379/0
+```
+
+Redis 应只监听本机或可信内网，绝不能把 6379 端口直接开放到公网。增加 worker 之前还应测试 SQLite 写入、会话文件锁、内存占用和上游 API 配额；worker 越多并不一定越快。
+
+### 手动使用 Gunicorn + Nginx
+
+不使用宝塔时也可以按相同结构部署。单层 Nginx 反向代理需要设置 `FLASK_ENV=production`、`FLASK_DEBUG=False`、`TRUST_PROXY_COUNT=1`，并使用上文的 Gunicorn 与 Nginx 配置。
+
+`TRUST_PROXY_COUNT` 必须等于真实可信代理层数；应用直接对外监听时不要启用。确保服务账号只能按需读取源码和环境变量，并能写入数据库、`DATA_DIR`、`IMAGES_DIR` 和 `THUMBNAILS_DIR`。
 
 ## HTTP 路由总览
 

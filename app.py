@@ -13,8 +13,10 @@ import binascii
 import logging
 import time
 import threading
+import ipaddress
 from datetime import datetime, timedelta
 from functools import wraps
+from urllib.parse import urlsplit
 from PIL import Image
 import io
 from filelock import FileLock, Timeout as FileLockTimeout
@@ -65,10 +67,25 @@ from database import (
 from email_service import generate_verification_code, send_verification_email
 from werkzeug.security import generate_password_hash
 
+UNSAFE_SECRET_KEYS = {
+    "your_random_secret_key_here",
+    "请替换为高强度随机字符串",
+    "change-me",
+    "changeme",
+}
+
+
+def _validated_secret_key():
+    secret_key = (os.getenv("SECRET_KEY") or "").strip()
+    if not secret_key:
+        raise ValueError("请设置环境变量 SECRET_KEY 或在 .env 文件中配置")
+    if secret_key.lower() in UNSAFE_SECRET_KEYS or len(secret_key.encode("utf-8")) < 32:
+        raise ValueError("SECRET_KEY 不能使用示例值，且必须至少包含 32 字节的随机数据")
+    return secret_key
+
+
 app = Flask(__name__, static_folder=None)
-app.secret_key = os.getenv("SECRET_KEY")
-if not app.secret_key:
-    raise ValueError("请设置环境变量 SECRET_KEY 或在 .env 文件中配置")
+app.secret_key = _validated_secret_key()
 
 _trust_proxy_count = int(os.getenv("TRUST_PROXY_COUNT", "0"))
 if _trust_proxy_count > 0:
@@ -141,6 +158,15 @@ def file_lock_timeout_handler(e):
         }), 503
     return "请求正在处理中，请稍后重试", 503
 
+
+@app.after_request
+def prevent_sensitive_api_caching(response):
+    if request.path.startswith("/api/admin/") or request.path.startswith("/api/sessions"):
+        response.headers["Cache-Control"] = "no-store"
+        response.headers["Pragma"] = "no-cache"
+    return response
+
+
 # 安全响应头（仅在生产环境启用HTTPS强制）
 if os.getenv('FLASK_ENV') == 'production':
     Talisman(app, 
@@ -200,6 +226,7 @@ GENERATION_CHARGE_TTL_SECONDS = max(
     600, int(os.getenv("GENERATION_CHARGE_TTL_SECONDS", "900"))
 )
 ALLOWED_IMAGE_EXTENSIONS = {'.png', '.jpg', '.jpeg', '.gif', '.webp', '.ico'}
+PIL_ALLOWED_FORMATS = ("PNG", "JPEG", "GIF", "WEBP", "ICO")
 REFERENCE_FORMATS = {
     "PNG": ("image/png", ".png"),
     "JPEG": ("image/jpeg", ".jpg"),
@@ -208,11 +235,23 @@ REFERENCE_FORMATS = {
     "ICO": ("image/x-icon", ".ico"),
 }
 
+
+def _harden_private_path(path, mode):
+    if os.name != "posix" or not os.path.exists(path):
+        return
+    try:
+        os.chmod(path, mode)
+    except OSError as exc:
+        logger.warning("无法收紧敏感路径权限: %s", exc)
+
+
 # 确保目录存在
 os.makedirs(DATA_DIR, exist_ok=True)
 os.makedirs(SESSIONS_DIR, exist_ok=True)
 os.makedirs(IMAGES_DIR, exist_ok=True)
 os.makedirs(THUMBNAILS_DIR, exist_ok=True)
+for private_directory in (DATA_DIR, SESSIONS_DIR, IMAGES_DIR, THUMBNAILS_DIR):
+    _harden_private_path(private_directory, 0o700)
 
 # 静态文件版本号（用于缓存刷新，每次启动时更新）
 APP_VERSION = str(int(time.time()))
@@ -221,6 +260,34 @@ APP_VERSION = str(int(time.time()))
 def inject_version():
     """向所有模板注入版本号，用于静态文件缓存刷新"""
     return {"v": APP_VERSION}
+
+
+def _validate_custom_base_url(base_url):
+    """限制自定义端点为无内嵌凭据的 HTTP(S) URL。"""
+    if not isinstance(base_url, str) or not base_url or len(base_url) > 2048:
+        return "自定义 API 端点 URL 无效"
+    try:
+        parsed = urlsplit(base_url)
+        parsed_port = parsed.port
+    except ValueError:
+        return "自定义 API 端点 URL 无效"
+    if parsed.scheme not in ("http", "https") or not parsed.hostname:
+        return "自定义 API 端点只允许 http 或 https URL"
+    if parsed.username or parsed.password or parsed.query or parsed.fragment:
+        return "自定义 API 端点不能包含账号、密码、查询参数或片段"
+    if parsed_port is not None and not 1 <= parsed_port <= 65535:
+        return "自定义 API 端点端口必须在 1 到 65535 之间"
+    if os.getenv("FLASK_ENV") == "production" and parsed.scheme != "https":
+        hostname = parsed.hostname.lower()
+        is_loopback = hostname == "localhost"
+        try:
+            is_loopback = is_loopback or ipaddress.ip_address(hostname).is_loopback
+        except ValueError:
+            pass
+        if not is_loopback:
+            return "生产环境仅允许 HTTPS 自定义端点；本机回环地址除外"
+    return None
+
 
 # ========================================
 # Gemini 客户端（动态配置，支持多种 Provider）
@@ -231,7 +298,17 @@ def _build_genai_client(provider, api_key, custom_base_url=None):
     http_options = types.HttpOptions(timeout=300000)  # 300秒超时
 
     if provider == 'custom':
-        logger.info(f"使用自定义 API 端点: {custom_base_url}")
+        validation_error = _validate_custom_base_url(custom_base_url)
+        if validation_error:
+            raise ValueError(validation_error)
+        endpoint = urlsplit(custom_base_url)
+        hostname = endpoint.hostname or ""
+        if ":" in hostname:
+            hostname = f"[{hostname}]"
+        safe_origin = f"{endpoint.scheme}://{hostname}"
+        if endpoint.port:
+            safe_origin += f":{endpoint.port}"
+        logger.info("使用自定义 API 端点: %s", safe_origin)
         http_options = types.HttpOptions(timeout=300000, base_url=custom_base_url)
         return genai.Client(api_key=api_key, http_options=http_options)
     else:  # google_ai（默认）
@@ -472,7 +549,9 @@ def _save_sessions_unlocked(user_id, sessions):
             json.dump(sessions, f, ensure_ascii=False, indent=2)
             f.flush()
             os.fsync(f.fileno())
+        _harden_private_path(tmp_file, 0o600)
         os.replace(tmp_file, sessions_file)
+        _harden_private_path(sessions_file, 0o600)
     finally:
         if os.path.exists(tmp_file):
             os.remove(tmp_file)
@@ -550,7 +629,7 @@ def create_thumbnail(image_path, thumbnail_filename, max_size=400, quality=60):
     """
     thumbnail_path = os.path.join(THUMBNAILS_DIR, thumbnail_filename)
     try:
-        with Image.open(image_path) as img:
+        with Image.open(image_path, formats=PIL_ALLOWED_FORMATS) as img:
             # 转换为RGB模式（如果是RGBA等）
             if img.mode in ('RGBA', 'P'):
                 img = img.convert('RGB')
@@ -563,6 +642,7 @@ def create_thumbnail(image_path, thumbnail_filename, max_size=400, quality=60):
             
             # 保存为JPEG格式以获得更好的压缩
             img.save(thumbnail_path, 'JPEG', quality=quality, optimize=True)
+            _harden_private_path(thumbnail_path, 0o600)
             
             return f"/static/thumbnails/{thumbnail_filename}"
     except Exception as e:
@@ -1086,7 +1166,7 @@ def _process_reference_images(reference_images, session_id, message_index):
                 f"参考图片总大小不能超过 {MAX_REFERENCE_TOTAL_BYTES // (1024 * 1024)} MB"
             )
         try:
-            with Image.open(io.BytesIO(decoded)) as image:
+            with Image.open(io.BytesIO(decoded), formats=PIL_ALLOWED_FORMATS) as image:
                 image_format = image.format
                 if image.width * image.height > MAX_REFERENCE_PIXELS:
                     raise ReferenceImageError("参考图片像素尺寸过大")
@@ -1113,6 +1193,7 @@ def _save_reference_images(decoded_images):
             path = os.path.join(IMAGES_DIR, item["filename"])
             with open(path, "xb") as f:
                 f.write(item["data"])
+            _harden_private_path(path, 0o600)
             filenames.append(item["filename"])
         return filenames
     except Exception:
@@ -1153,6 +1234,7 @@ def _process_gemini_response(response, session_id):
 
                 image = part.as_image()
                 image.save(image_path)
+                _harden_private_path(image_path, 0o600)
                 result_image = f"/static/images/{image_filename}"
 
                 if hasattr(part, 'thought_signature') and part.thought_signature:
@@ -1965,39 +2047,61 @@ def admin_save_api_settings():
     if any(data.get(field) is not None and not isinstance(data.get(field), str) for field in string_fields):
         return jsonify({"error": "设置字段格式无效"}), 400
     provider = (data.get("provider") or "").strip()
-    api_key = (data.get("api_key") or "").strip()
+    submitted_api_key = (data.get("api_key") or "").strip()
     custom_base_url = (data.get("custom_base_url") or "").strip() or None
     default_model = (data.get("default_model") or "gemini-3.1-flash-image").strip()
     email_sender = (data.get("email_sender") or "").strip() or None
-    email_password = (data.get("email_password") or "").strip() or None
+    submitted_email_password = (data.get("email_password") or "").strip() or None
     smtp_server = (data.get("smtp_server") or "").strip() or None
     smtp_port = data.get("smtp_port")
-
-    # 获取现有配置用于回填空字段
-    db_settings = get_active_api_settings()
-    if db_settings:
-        api_key = api_key or db_settings.get("api_key")
-        email_sender = email_sender or db_settings.get("email_sender") or os.getenv("EMAIL_SENDER")
-        email_password = email_password or db_settings.get("email_password") or os.getenv("EMAIL_PASSWORD")
-        smtp_server = smtp_server or db_settings.get("smtp_server") or os.getenv("SMTP_SERVER")
-        smtp_port = smtp_port or db_settings.get("smtp_port") or os.getenv("SMTP_PORT")
-    else:
-        # 仅使用 .env 部署时，保存其他设置也应复用现有密钥。
-        api_key = api_key or os.getenv("GEMINI_API_KEY")
-        email_sender = email_sender or os.getenv("EMAIL_SENDER")
-        email_password = email_password or os.getenv("EMAIL_PASSWORD")
-        smtp_server = smtp_server or os.getenv("SMTP_SERVER")
-        smtp_port = smtp_port or os.getenv("SMTP_PORT")
 
     # 验证
     if provider not in ('google_ai', 'custom'):
         return jsonify({"error": "无效的服务商类型"}), 400
     if default_model not in ALLOWED_MODELS:
         return jsonify({"error": "无效的默认模型"}), 400
+    if provider != 'custom':
+        custom_base_url = None
+    else:
+        validation_error = _validate_custom_base_url(custom_base_url)
+        if validation_error:
+            return jsonify({"error": validation_error}), 400
+
+    # 只允许在目标端点不变时复用数据库中的已保存秘密。环境变量秘密不会被
+    # 后台静默复制进数据库，避免“改端点但留空密码”造成凭据转发。
+    db_settings = get_active_api_settings()
+    current_provider = db_settings.get("provider") if db_settings else None
+    current_base_url = db_settings.get("custom_base_url") if db_settings else None
+    if current_provider != 'custom':
+        current_base_url = None
+    if db_settings and (provider, custom_base_url) != (current_provider, current_base_url) \
+            and not submitted_api_key:
+        return jsonify({"error": "更换 API 服务商或端点时必须重新输入 API Key"}), 400
+
+    api_key = submitted_api_key or (db_settings.get("api_key") if db_settings else None)
     if not api_key:
-        return jsonify({"error": "API Key 不能为空"}), 400
-    if provider == 'custom' and not custom_base_url:
-        return jsonify({"error": "自定义模式下必须填写 API 端点 URL"}), 400
+        return jsonify({"error": "保存到数据库时必须重新输入 API Key"}), 400
+
+    current_email_sender = (
+        (db_settings.get("email_sender") if db_settings else None)
+        or os.getenv("EMAIL_SENDER")
+    )
+    current_smtp_server = (
+        (db_settings.get("smtp_server") if db_settings else None)
+        or os.getenv("SMTP_SERVER")
+    )
+    current_smtp_port = (
+        (db_settings.get("smtp_port") if db_settings else None)
+        or os.getenv("SMTP_PORT")
+    )
+    current_email_password = (
+        (db_settings.get("email_password") if db_settings else None)
+        or os.getenv("EMAIL_PASSWORD")
+    )
+    email_sender = email_sender or current_email_sender
+    smtp_server = smtp_server or current_smtp_server
+    if smtp_port in (None, ""):
+        smtp_port = current_smtp_port
     if smtp_port is not None:
         try:
             smtp_port = int(smtp_port)
@@ -2005,6 +2109,17 @@ def admin_save_api_settings():
             return jsonify({"error": "SMTP 端口必须是整数"}), 400
         if not 1 <= smtp_port <= 65535:
             return jsonify({"error": "SMTP 端口必须在 1 到 65535 之间"}), 400
+
+    smtp_target_changed = (
+        (smtp_server or "").lower(), str(smtp_port or "")
+    ) != (
+        (current_smtp_server or "").lower(), str(current_smtp_port or "")
+    )
+    if smtp_target_changed and current_email_password and not submitted_email_password:
+        return jsonify({"error": "更换 SMTP 服务器或端口时必须重新输入邮箱密码"}), 400
+    email_password = submitted_email_password or (
+        db_settings.get("email_password") if db_settings else None
+    )
 
     # 保存到数据库
     success, message = save_api_settings(provider, api_key, custom_base_url, default_model, email_sender, email_password, smtp_server, smtp_port)

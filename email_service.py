@@ -202,7 +202,7 @@ def send_verification_email(recipient_email, verification_code):
             server.login(email_sender, email_password)
             server.send_message(message)
         
-        logger.info(f"验证码邮件已发送到 {recipient_email}")
+        logger.info("验证码邮件发送成功")
         return True, "success"
     
     except smtplib.SMTPAuthenticationError:

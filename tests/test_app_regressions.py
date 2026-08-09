@@ -13,7 +13,11 @@ from PIL import Image
 
 
 _IMPORT_TEMP_DIR = tempfile.TemporaryDirectory()
-os.environ.setdefault("SECRET_KEY", "test-secret-key")
+os.environ.setdefault("SECRET_KEY", "test-only-secret-key-with-at-least-32-bytes")
+os.environ.setdefault(
+    "CREDENTIAL_ENCRYPTION_KEY",
+    "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=",
+)
 os.environ["DISABLE_BACKGROUND_TASKS"] = "true"
 os.environ["DATABASE_FILE"] = os.path.join(_IMPORT_TEMP_DIR.name, "import.sqlite")
 os.environ["DATA_DIR"] = os.path.join(_IMPORT_TEMP_DIR.name, "data")
@@ -269,6 +273,55 @@ class AppRegressionTests(unittest.TestCase):
 
         self.assertEqual(400, response.status_code)
         self.assertEqual(4, database.get_user_by_id(self.user_id)["credits"])
+
+    def test_reference_image_parser_is_restricted_to_allowlisted_formats(self):
+        reference_buffer = io.BytesIO()
+        Image.new("RGB", (2, 2), "white").save(reference_buffer, format="JPEG")
+        encoded_reference = base64.b64encode(reference_buffer.getvalue()).decode("ascii")
+        original_open = Image.open
+
+        with patch.object(app_module.Image, "open", wraps=original_open) as image_open:
+            app_module._process_reference_images(
+                [f"data:image/jpeg;base64,{encoded_reference}"],
+                str(uuid.uuid4()),
+                0,
+            )
+
+        self.assertEqual(app_module.PIL_ALLOWED_FORMATS, image_open.call_args.kwargs["formats"])
+
+    def test_insecure_secret_keys_are_rejected(self):
+        for value in ("your_random_secret_key_here", "too-short"):
+            with self.subTest(value=value), patch.dict(os.environ, {"SECRET_KEY": value}):
+                with self.assertRaises(ValueError):
+                    app_module._validated_secret_key()
+
+    def test_custom_endpoint_rejects_embedded_credentials_and_remote_http_in_production(self):
+        self.assertIsNotNone(
+            app_module._validate_custom_base_url("https://user:password@example.com/v1")
+        )
+        with patch.dict(os.environ, {"FLASK_ENV": "production"}):
+            self.assertIsNotNone(
+                app_module._validate_custom_base_url("http://api.example.com/v1")
+            )
+            self.assertIsNone(
+                app_module._validate_custom_base_url("http://127.0.0.1:8045/v1")
+            )
+
+    def test_admin_must_reenter_key_when_changing_custom_endpoint(self):
+        self.assertTrue(database.save_api_settings(
+            "custom", "existing-api-key", "https://old.example.test/v1"
+        )[0])
+        client = self._client_for(self.admin_id)
+
+        response = client.post("/api/admin/api-settings", json={
+            "provider": "custom",
+            "api_key": "",
+            "custom_base_url": "https://new.example.test/v1",
+            "default_model": "gemini-3.1-flash-image",
+        })
+
+        self.assertEqual(400, response.status_code)
+        self.assertIn("重新输入 API Key", response.get_json()["error"])
 
     def test_admin_delete_rejection_preserves_admin_history_and_image(self):
         session_id = self._create_session(self.admin_id)

@@ -27,6 +27,10 @@
 
 > This project is licensed under [CC BY-NC-SA 4.0](LICENSE). You must credit [@gbmomo](https://github.com/gbmomo), link to the [original project](https://github.com/gbmomo/gemini-image-webapp), refrain from commercial use without separate permission, and distribute adaptations under the same license. Commercial licensing: S@gitsay.com, QQ: 550948321, WeChat: Goblin_MoMo.
 
+## Quick Navigation
+
+[Features](#current-features) · [Quick start](#quick-start) · [Environment variables](#environment-variables) · [Production deployment](#production-deployment) · [Security boundaries](#storage-and-security-boundaries) · [Troubleshooting](#troubleshooting)
+
 ## Current Features
 
 - Text-to-image, reference-image generation, and contextual multi-turn image iteration. References can be added with the file picker, drag and drop, or paste.
@@ -107,17 +111,24 @@ copy .env.example .env
 cp .env.example .env
 ```
 
-Set at least these two values:
+Set at least these values when using dashboard-managed credentials:
 
 ```env
 SECRET_KEY=replace_with_a_strong_random_value
 ADMIN_PASSWORD=replace_with_the_admin_password
+CREDENTIAL_ENCRYPTION_KEY=replace_with_an_independent_fernet_key
 ```
 
 Generate a `SECRET_KEY` with:
 
 ```bash
 python -c "import secrets; print(secrets.token_hex(32))"
+```
+
+Generate the independent database credential encryption key with:
+
+```bash
+python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 ```
 
 Start the app:
@@ -128,7 +139,7 @@ python app.py
 
 Open `http://127.0.0.1:5000`, sign in as `admin` with `ADMIN_PASSWORD`, then configure Gemini API and SMTP settings in the admin dashboard. You may instead set `GEMINI_API_KEY` and the email settings in `.env`.
 
-At startup, `ADMIN_PASSWORD` is synchronized to the existing `admin` account. On the first start without this variable, the application generates a random password and writes it to the startup log. Always configure it explicitly in production.
+At startup, `ADMIN_PASSWORD` is synchronized to the existing `admin` account. The application refuses to start when it is missing. Production passwords must contain at least 12 characters and three character classes.
 
 ## Environment Variables
 
@@ -139,7 +150,8 @@ API settings saved in the admin dashboard take precedence as a group over `GEMIN
 | Variable | Default | Description |
 |---|---|---|
 | `SECRET_KEY` | none | Flask Session and CSRF signing key; required |
-| `ADMIN_PASSWORD` | randomly generated on first start | Password for the `admin` account; required in production |
+| `ADMIN_PASSWORD` | none | Password for the `admin` account; required; production requires 12 characters and three character classes |
+| `CREDENTIAL_ENCRYPTION_KEY` | none | Independent Fernet key required when API/SMTP credentials are stored from the dashboard |
 | `GEMINI_API_KEY` | empty | Gemini API key; may instead be saved in the admin dashboard |
 | `GEMINI_API_BASE_URL` | empty | Custom compatible endpoint; enables the `custom` provider in environment mode |
 | `DEFAULT_MODEL` | `gemini-3.1-flash-image` | Default model; must be one of the model IDs above |
@@ -199,14 +211,15 @@ The current recharge dialog's “Buy now” button is hard-coded to `https://pay
 
 | Data | Location | Actual protection |
 |---|---|---|
-| Users, codes, API/SMTP settings, prices, charge ledger | SQLite, `data/users.db` by default | Passwords and verification codes use salted hashes; redemption codes store a verification hash, SHA-256 lookup value, and prefix |
+| Users, codes, API/SMTP settings, prices, charge ledger | SQLite, `data/users.db` by default | Passwords and verification codes use salted hashes; redemption codes store a verification hash, SHA-256 lookup value, and prefix; API keys and SMTP passwords use Fernet encryption |
 | Conversations and messages | `data/sessions/user_<id>.json` | Plain local JSON with file locks, temporary files, `fsync`, and atomic replacement |
 | Generated images, references, thumbnails | `static/images`, `static/thumbnails` | Plain local files; HTTP access is limited to the file owner or an administrator |
 
 Important boundaries:
 
-- API keys, SMTP passwords, emails, conversation JSON, and images are not encrypted at rest. Protect them with host file permissions, disk encryption, and an appropriate backup policy.
+- API keys and SMTP passwords are encrypted with `CREDENTIAL_ENCRYPTION_KEY`; keep that key separate from the database and its backups. Emails, conversation JSON, and images still depend on host permissions, disk encryption, and backup policy.
 - Flask's Session cookie is signed, not a database/file encryption mechanism. Do not treat `SECRET_KEY` as an at-rest encryption key.
+- Saving API/SMTP settings retains only the current row. The first upgraded startup encrypts the active row, removes historical settings, and rewrites SQLite pages. Rotate credentials that were previously stored in plaintext and remove old backups.
 - During generation, prompts, conversation context, and reference images are sent to the configured Gemini/API provider. Registration sends the recipient email and code to the configured SMTP service. Operators must disclose data processing according to the providers they use.
 - Back up the SQLite database, `data/sessions`, images, and thumbnails. A database-only backup cannot restore complete history.
 
@@ -214,13 +227,41 @@ The application also validates CSRF on all unsafe HTTP methods with a one-hour t
 
 ## Production Deployment
 
-Run Gunicorn behind an HTTPS reverse proxy such as Nginx. The Gemini SDK timeout is 300 seconds, so Gunicorn and proxy timeouts must be longer:
+The recommended topology is HTTPS client → Nginx → Gunicorn on `127.0.0.1:5000`. Do not expose the Flask development server or Gunicorn port 5000 directly to the internet.
+
+For a personal or small-to-medium deployment, start with one worker and multiple threads:
 
 ```bash
 gunicorn -w 1 --threads 8 -b 127.0.0.1:5000 --timeout 360 app:app
 ```
 
-Key settings for a single Nginx proxy layer:
+- `-w 1` runs one application process, so the default in-memory rate limiter remains consistent and Redis is not required.
+- `--threads 8` allows that process to wait on several network requests concurrently; it does not limit the site to one user.
+- `--timeout 360` accommodates image generation. Set the reverse proxy send and read timeouts to the same value.
+
+Set the following production variables before starting the service:
+
+```env
+SECRET_KEY=a_unique_random_value_of_at_least_32_bytes
+ADMIN_PASSWORD=a_password_of_at_least_12_characters_and_3_character_classes
+CREDENTIAL_ENCRYPTION_KEY=a_separately_generated_fernet_key
+FLASK_ENV=production
+FLASK_DEBUG=False
+TRUST_PROXY_COUNT=1
+```
+
+Generate the two keys independently:
+
+```bash
+python -c "import secrets; print(secrets.token_hex(32))"
+python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+```
+
+When restoring or moving an existing database, preserve its original `CREDENTIAL_ENCRYPTION_KEY`. Replacing that key makes the encrypted API and SMTP credentials unreadable. Changing `SECRET_KEY` invalidates existing browser sessions.
+
+A standard Fernet key contains 44 characters and ends with `=`. Some hosting panels remove that Base64 padding when saving environment variables. This version strictly validates the remaining 43 characters and restores the omitted padding automatically; no other character may be removed or changed.
+
+Key settings for one trusted Nginx proxy layer are:
 
 ```nginx
 server {
@@ -231,20 +272,53 @@ server {
 
     location / {
         proxy_pass http://127.0.0.1:5000;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Host $host;
         proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_connect_timeout 360s;
+        proxy_connect_timeout 60s;
         proxy_send_timeout 360s;
         proxy_read_timeout 360s;
     }
 }
 ```
 
-Also set `FLASK_ENV=production`, `FLASK_DEBUG=False`, and `TRUST_PROXY_COUNT=1`. `TRUST_PROXY_COUNT` must match the actual number of trusted proxy layers; do not enable it when exposing the app directly. Ensure the service account can write to the database, `DATA_DIR`, `IMAGES_DIR`, and `THUMBNAILS_DIR`.
+When merging this block into a panel-generated Nginx configuration:
 
-The default `memory://` rate limiter is suitable only for one worker. For multiple workers, configure a shared store such as `RATELIMIT_STORAGE_URI=redis://127.0.0.1:6379/0`. The application does not require WebSockets or streaming responses.
+- Preserve panel-managed certificate paths, ACME `/.well-known/` rules, and log destinations. Do not replace them with paths from an example.
+- Use `proxy_connect_timeout 60s` for the local Gunicorn connection and `proxy_send_timeout 360s` plus `proxy_read_timeout 360s` for uploads and image-generation responses. Nginx documents that connection establishment timeouts usually cannot exceed 75 seconds, so a 360-second connect timeout is not useful.
+- The application does not use WebSockets. Remove `Upgrade`/`Connection: upgrade` and non-standard `REMOTE-HOST` request headers.
+- Use `$host` for `X-Forwarded-Host`, especially when one server block accepts more than one hostname.
+- Do not enable proxy caching for authenticated pages, `/api/`, `/admin`, or user media. Remove unused `proxy_cache_purge`, public `/purge` locations, and `X-Cache` headers generated by cache templates.
+- Under the traditional Nginx inheritance rule, defining any `add_header` inside `location /` prevents server-level security headers from being inherited there. Avoid a location-only `add_header X-Cache`, or deliberately repeat/merge every required header. See the official [Nginx header module documentation](https://nginx.org/en/docs/http/ngx_http_headers_module.html).
+- A static `location /health { return 200; }` checks Nginx only, not Gunicorn, the database, or the upstream API.
+- HTTP/3 is optional and version-dependent. If the panel enables it, open UDP 443, ensure the certificate covers every `server_name`, and follow the current [Nginx HTTP/3 documentation](https://nginx.org/en/docs/http/ngx_http_v3_module.html) instead of copying old draft `Alt-Svc` tokens.
+
+Run `nginx -t` or the panel's configuration checker before every reload. Keep port 5000 closed to the public internet and expose only Nginx ports 80/443. `TRUST_PROXY_COUNT` must match the actual trusted proxy chain; do not increase it blindly.
+
+### Workers and Redis
+
+Keep `-w 1 --threads 8` unless monitoring shows that one process is a bottleneck. Use a shared rate-limit backend before running multiple workers, containers, or server instances:
+
+```env
+RATELIMIT_STORAGE_URI=redis://127.0.0.1:6379/0
+```
+
+Redis must remain on localhost or a trusted private network; never expose port 6379 publicly. More workers also increase SQLite write contention, file-lock activity, memory use, and upstream API concurrency, so scale based on measurements rather than a generic CPU formula.
+
+### Deployment Checklist
+
+1. Confirm that the service account can write to the database, `DATA_DIR`, `IMAGES_DIR`, and `THUMBNAILS_DIR`, without granting world-writable permissions.
+2. Configure the API in the admin dashboard or set `GEMINI_API_KEY`; add SMTP variables only when email registration is needed.
+3. Enable a valid TLS certificate and force HTTPS.
+4. Set `client_max_body_size 50m` and 360-second proxy timeouts.
+5. Test admin login, one image generation, email verification if enabled, and cross-user media access controls.
+6. Back up `data/users.db`, `data/sessions/`, `static/images/`, and `static/thumbnails/`. Store `CREDENTIAL_ENCRYPTION_KEY` separately from database backups.
+
+The Chinese README includes a screenshot-based [BT Panel deployment guide](README.md#宝塔面板部署新手推荐).
 
 ## HTTP Route Overview
 
